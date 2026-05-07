@@ -17,6 +17,19 @@
  * low-precision is a few hundred mults per body.
  */
 
+/* Body trail ring buffer. Stores true RA/Dec — we re-project every frame
+ * so trails show motion *against the stars* (incl. retrograde) rather
+ * than diurnal arcs. New samples push when JD has advanced enough that
+ * the apparent motion is at least ~1 sub-pixel — cheap and self-tuning
+ * across time-scrub speeds. */
+#define ASTRO_TRAIL_LEN 256
+
+typedef struct {
+    double ra_rad;
+    double dec_rad;
+    int    valid;
+} TrailSample;
+
 typedef struct {
     Observer       observer;
     EphemPosition  pos[EPHEM_COUNT];
@@ -28,6 +41,21 @@ typedef struct {
      * illuminated fraction of the visible disc, [0, 1]. */
     double         moon_illum;
     double         moon_elongation;
+
+    /* Toggles */
+    int            show_grid;       /* alt-az grid lines (key: g)        */
+    int            show_trails;     /* planet RA/Dec trails (key: t)     */
+    int            cursor_active;   /* object-pick cursor on (key: c)    */
+
+    /* Trail ring buffers per body. */
+    TrailSample    trails[EPHEM_COUNT][ASTRO_TRAIL_LEN];
+    int            trail_head[EPHEM_COUNT];
+    double         trail_last_jd;
+
+    /* Cursor screen position in *cell* coords; nudged by hjkl. The
+     * nearest above-horizon body is reported in the scan panel. */
+    int            cursor_col, cursor_row;
+    int            cursor_locked_body;   /* EphemBody index, -1 = none   */
 } AstroState;
 
 /* Compute every body's geocentric + topocentric position from `now`. */

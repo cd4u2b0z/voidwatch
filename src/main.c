@@ -68,7 +68,8 @@ static void print_help(const char *argv0) {
         "$VOIDWATCH_LAT/$VOIDWATCH_LON  >  (0,0)\n"
         "\n"
         "Runtime keys: h toggle HUD, ? help overlay, q/Esc quit.\n"
-        "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h.\n",
+        "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
+        "              g grid, t trails, c cursor (then hjkl, Esc to exit).\n",
         argv0);
 }
 
@@ -196,9 +197,37 @@ int main(int argc, char **argv) {
         for (;;) {
             int k = term_poll_key();
             if (!k) break;
-            if (k == 'q' || k == 'Q' || k == 27) { quitting = 1; break; }
+            /* In astro cursor mode hjkl move the reticle instead of toggling
+             * HUD. `c` toggles cursor mode; Esc exits cursor mode if active,
+             * else quits. */
+            if (k == 'q' || k == 'Q') { quitting = 1; break; }
+            else if (k == 27) {
+                if (astro_mode && astro.cursor_active) astro.cursor_active = 0;
+                else                                    { quitting = 1; break; }
+            }
+            else if (astro_mode && astro.cursor_active &&
+                     (k == 'h' || k == 'j' || k == 'k' || k == 'l')) {
+                int dx = (k == 'l') - (k == 'h');
+                int dy = (k == 'j') - (k == 'k');
+                astro.cursor_col += dx * 2;
+                astro.cursor_row += dy;
+            }
             else if (k == 'h' || k == 'H')       { show_hud  = !show_hud;  }
             else if (k == '?')                   { show_help = !show_help; }
+            else if (astro_mode && (k == 'g' || k == 'G')) {
+                astro.show_grid = !astro.show_grid;
+            }
+            else if (astro_mode && (k == 't' || k == 'T')) {
+                astro.show_trails = !astro.show_trails;
+            }
+            else if (astro_mode && (k == 'c' || k == 'C')) {
+                astro.cursor_active = !astro.cursor_active;
+                if (astro.cursor_active && astro.cursor_col == 0
+                                        && astro.cursor_row == 0) {
+                    astro.cursor_col = cols / 2;
+                    astro.cursor_row = rows / 2;
+                }
+            }
             /* Astro-mode time controls. Silently ignored in sandbox mode
              * (the n-body sim has no notion of "rewind"). */
             else if (astro_mode && (k == '+' || k == '=')) {

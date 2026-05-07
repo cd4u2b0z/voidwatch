@@ -20,6 +20,9 @@ typedef struct {
     float core_blend;   /* white-shift toward centre           */
 } AstroStyle;
 
+/* Forward decls — used by astro_update before their definitions. */
+static void trails_capture(AstroState *st);
+
 static AstroStyle style_for(EphemBody body) {
     AstroStyle s = { .color = {1,1,1}, .radius_sub = 1.5f,
                      .intensity = 0.7f, .core_blend = 0.6f };
@@ -65,6 +68,8 @@ void astro_update(AstroState *st, time_t now) {
     /* Build a [0, 2π) elongation that wraps through full at π. */
     st->moon_elongation = (dra >= 0.0) ? sep : (2.0 * M_PI - sep);
     st->moon_illum      = (1.0 - cos_sep) * 0.5;
+
+    trails_capture(st);
 }
 
 /* Project alt/az onto screen via azimuthal equidistant centered on zenith.
@@ -546,6 +551,249 @@ static void stamp_moon(Framebuffer *fb, float cx, float cy,
     }
 }
 
+/* ---- Sky grid -------------------------------------------------------- */
+
+static void stamp_dot(Framebuffer *fb, float sx, float sy,
+                      float r, float g, float b) {
+    int x = (int)floorf(sx + 0.5f);
+    int y = (int)floorf(sy + 0.5f);
+    if (x < 0 || y < 0 || x >= fb->sub_w || y >= fb->sub_h) return;
+    fb_max(fb, x, y, r, g, b);
+}
+
+static void grid_draw(const AstroState *st, Framebuffer *fb) {
+    /* Faint alt-az grid: altitude rings every 30°, azimuth radials every
+     * 30°. Stamped sparsely so stars/MW overdraw without the grid
+     * fighting them. */
+    Color tint = { 0.20f, 0.30f, 0.42f };
+    double lst_rad = st->lst_hours * (M_PI / 12.0); (void)lst_rad;
+
+    /* Altitude rings — walk az 0..360 step 1°, fixed alt. */
+    for (int alt_deg = 0; alt_deg <= 60; alt_deg += 30) {
+        if (alt_deg <= 0) continue;
+        double alt = alt_deg * DEG2RAD;
+        for (int az_deg = 0; az_deg < 360; az_deg += 1) {
+            if ((az_deg / 4) % 2) continue;          /* dashed */
+            double az = az_deg * DEG2RAD;
+            float sx, sy;
+            if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
+            stamp_dot(fb, sx, sy, tint.r, tint.g, tint.b);
+        }
+    }
+    /* Az radials — walk alt 0..85° step 1°. Drawn at every 30° az.       */
+    for (int az_deg = 0; az_deg < 360; az_deg += 30) {
+        double az = az_deg * DEG2RAD;
+        for (int alt_deg = 1; alt_deg <= 85; alt_deg += 1) {
+            if ((alt_deg / 3) % 2) continue;          /* dashed */
+            double alt = alt_deg * DEG2RAD;
+            float sx, sy;
+            if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
+            stamp_dot(fb, sx, sy, tint.r, tint.g, tint.b);
+        }
+    }
+}
+
+/* ---- Body trails ----------------------------------------------------- */
+
+static void trails_capture(AstroState *st) {
+    /* Push a new sample only after enough time has passed that the slowest
+     * planet (Neptune) might've moved noticeably. ~1 minute of virt-time
+     * is below 1 sub-pixel for any planet at 1× speed but visible at high
+     * scrub — self-tunes. */
+    const double min_dt_days = 1.0 / (24.0 * 60.0);
+    if (st->trail_last_jd != 0.0 &&
+        fabs(st->jd - st->trail_last_jd) < min_dt_days) return;
+    st->trail_last_jd = st->jd;
+    /* Skip Sun/Moon — Sun trail is uninteresting, Moon is too fast and
+     * smears the screen. Trails for the 8 planets only. */
+    for (int i = 0; i < EPHEM_COUNT; i++) {
+        if (i == EPHEM_SUN || i == EPHEM_MOON) continue;
+        int h = st->trail_head[i];
+        st->trails[i][h].ra_rad  = st->pos[i].ra_rad;
+        st->trails[i][h].dec_rad = st->pos[i].dec_rad;
+        st->trails[i][h].valid   = 1;
+        st->trail_head[i] = (h + 1) % ASTRO_TRAIL_LEN;
+    }
+}
+
+static void trails_draw(const AstroState *st, Framebuffer *fb) {
+    double lst_rad = st->lst_hours * (M_PI / 12.0);
+    double lat     = st->observer.lat_rad;
+    for (int i = 0; i < EPHEM_COUNT; i++) {
+        if (i == EPHEM_SUN || i == EPHEM_MOON) continue;
+        AstroStyle base = style_for((EphemBody)i);
+        int head = st->trail_head[i];
+        for (int n = 0; n < ASTRO_TRAIL_LEN; n++) {
+            int idx = (head - 1 - n + ASTRO_TRAIL_LEN) % ASTRO_TRAIL_LEN;
+            const TrailSample *s = &st->trails[i][idx];
+            if (!s->valid) break;
+            double alt, az;
+            radec_to_altaz(s->ra_rad, s->dec_rad, lat, lst_rad, &alt, &az);
+            if (alt < 0.0) continue;
+            float sx, sy;
+            if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
+            /* Newest = brightest, exponential fade back. */
+            float age = (float)n / (float)ASTRO_TRAIL_LEN;
+            float k = (1.0f - age) * (1.0f - age) * 0.55f;
+            stamp_dot(fb, sx, sy,
+                      base.color.r * k, base.color.g * k, base.color.b * k);
+        }
+    }
+}
+
+/* ---- Galilean moons -------------------------------------------------- *
+ *
+ * Mean-motion only — accurate to a few Jupiter radii, plenty for terminal
+ * scale where the disc is ~5px. Mean longitudes at J2000 epoch from
+ * Meeus, simplified (we ignore mutual perturbations and the ~3° tilt of
+ * Jupiter's equator to its orbit). The moons walk circular orbits in the
+ * screen plane perpendicular to the line of sight; flat orientation is
+ * Saturn-style horizontal projection — close enough for our cell scale.
+ */
+typedef struct {
+    const char *name;
+    double      period_d;
+    double      a_rj;       /* semi-major in Jupiter radii  */
+    double      m0_rad;     /* mean longitude at J2000 epoch */
+    Color       tint;
+} JovianMoon;
+
+static const JovianMoon jovian[4] = {
+    { "Io",        1.769138,  5.91, 1.86, { 1.00f, 0.92f, 0.55f } },
+    { "Europa",    3.551181,  9.40, 3.50, { 0.90f, 0.90f, 0.85f } },
+    { "Ganymede",  7.154553, 15.00, 5.31, { 0.85f, 0.78f, 0.65f } },
+    { "Callisto", 16.689018, 26.36, 0.46, { 0.55f, 0.50f, 0.45f } },
+};
+
+static void galilean_draw(const AstroState *st, Framebuffer *fb) {
+    /* Need Jupiter above horizon. */
+    const EphemPosition *J = &st->pos[EPHEM_JUPITER];
+    if (J->alt_rad < 0.0) return;
+    float jx, jy;
+    if (project(fb->sub_w, fb->sub_h, J->alt_rad, J->az_rad, &jx, &jy) != 0)
+        return;
+
+    /* Pixel scale: Jupiter's stamp radius is style.radius_sub. Real Io is
+     * at 5.91 Jupiter radii — that maps to 5.91 * radius_sub pixels, which
+     * is visually about right. */
+    AstroStyle js = style_for(EPHEM_JUPITER);
+    float scale = js.radius_sub;     /* 1 R_J → this many sub-pixels */
+
+    double dt = st->jd - 2451545.0;  /* days from J2000 */
+    for (int i = 0; i < 4; i++) {
+        const JovianMoon *m = &jovian[i];
+        double M = m->m0_rad + (2.0 * M_PI / m->period_d) * dt;
+        /* Project onto the screen plane: x along sky-east, y suppressed
+         * by ring inclination (~3° — we just flatten by 0.06 in y). */
+        double dx = m->a_rj * cos(M);
+        double dy = m->a_rj * sin(M) * 0.06;
+        float sx = jx + (float)dx * scale;
+        float sy = jy + (float)dy * scale;
+        /* Tiny soft point. */
+        float sigma = 0.9f;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 2.5f;
+        int x0 = (int)floorf(sx - box);
+        int x1 = (int)ceilf (sx + box);
+        int y0 = (int)floorf(sy - box);
+        int y1 = (int)ceilf (sy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float ddy = (float)y - sy;
+            for (int x = x0; x <= x1; x++) {
+                float ddx = (float)x - sx;
+                float t = expf(-(ddx*ddx + ddy*ddy) / two_sigma_sq);
+                float k = t * 1.1f;
+                if (k < 0.01f) continue;
+                fb_add(fb, x, y,
+                       m->tint.r * k, m->tint.g * k, m->tint.b * k);
+            }
+        }
+    }
+}
+
+/* ---- Saturn rings ---------------------------------------------------- */
+
+/* Earth-Saturn ring opening angle (B). True B varies between -27° and
+ * +27° over Saturn's 29.46-year orbit, function of Saturn's heliocentric
+ * ecliptic longitude relative to its node line at ~169.5°. We don't track
+ * heliocentric longitude here, but the synodic phase from J2000 gives a
+ * sinusoid with the right period and amplitude — accurate to ~5° for our
+ * purposes. */
+static double saturn_ring_tilt_rad(double jd) {
+    /* Saturn mean ecliptic longitude advances ~12.22°/yr; at J2000 ≈ 50°. */
+    double dt_yr = (jd - 2451545.0) / 365.25;
+    double lon_deg = 50.0 + 12.22 * dt_yr;
+    double phase = (lon_deg - 169.5) * DEG2RAD;
+    return 28.07 * DEG2RAD * sin(phase);
+}
+
+static void stamp_saturn(Framebuffer *fb, float cx, float cy,
+                         const AstroStyle *s, double jd) {
+    /* Disc first, then ring ellipse. Ring is wider than the disc and
+     * tilted by B — we render it as 2 thin elliptical arcs (front + back)
+     * and let the disc cut the visible front half by being drawn last. */
+    double B = saturn_ring_tilt_rad(jd);
+    float ring_a = s->radius_sub * 2.6f;          /* ring outer in x */
+    float ring_b = ring_a * (float)fabs(sin(B));  /* projected y radius */
+    if (ring_b < 0.4f) ring_b = 0.4f;             /* edge-on minimum */
+    float ring_inner = ring_a * 0.65f;
+    float thickness  = 0.35f;                     /* sub-pixels */
+
+    Color rtint = s->color;
+    /* Sample the ring as parametric ellipse. */
+    int n_samples = (int)(ring_a * 14.0f);
+    if (n_samples < 32) n_samples = 32;
+    for (int i = 0; i < n_samples; i++) {
+        double th = (double)i / n_samples * 2.0 * M_PI;
+        for (float r = ring_inner; r <= ring_a; r += thickness) {
+            float ex = (float)cos(th) * r;
+            float ey = (float)sin(th) * r * (ring_b / ring_a);
+            float sx = cx + ex;
+            float sy = cy + ey;
+            int x = (int)floorf(sx + 0.5f);
+            int y = (int)floorf(sy + 0.5f);
+            if (x < 0 || y < 0 || x >= fb->sub_w || y >= fb->sub_h) continue;
+            /* Inner ring is brighter (Cassini gap roughly at 0.85 of outer). */
+            float k = 0.45f;
+            if (r > ring_a * 0.83f && r < ring_a * 0.88f) k = 0.15f; /* gap */
+            fb_add(fb, x, y, rtint.r * k, rtint.g * k, rtint.b * k);
+        }
+    }
+
+    /* Disc on top so the ring's near-side passes behind the planet. */
+    {
+        float sigma = s->radius_sub;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 3.0f;
+        int x0 = (int)floorf(cx - box);
+        int x1 = (int)ceilf (cx + box);
+        int y0 = (int)floorf(cy - box);
+        int y1 = (int)ceilf (cy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float dy = (float)y - cy;
+            for (int x = x0; x <= x1; x++) {
+                float dx = (float)x - cx;
+                float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                float k = t * s->intensity;
+                if (k < 0.005f) continue;
+                float w = t * t * s->core_blend;
+                float r  = (s->color.r * (1.0f - w) + w) * k;
+                float g  = (s->color.g * (1.0f - w) + w) * k;
+                float bl = (s->color.b * (1.0f - w) + w) * k;
+                fb_add(fb, x, y, r, g, bl);
+            }
+        }
+    }
+}
+
 static void stamp_body(Framebuffer *fb, float cx, float cy,
                        const AstroStyle *s) {
     float sigma = s->radius_sub;
@@ -591,10 +839,17 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
      * accumulate, so re-stamping each frame is fine. */
     milkyway_draw(st, fb);
 
+    /* Optional alt-az grid sits behind the constellations + stars. */
+    if (st->show_grid) grid_draw(st, fb);
+
     /* Constellation stick figures *before* stars so brighter star stamps
      * cleanly overdraw line dots near the line endpoints. */
     constellations_draw(st, fb);
     stars_draw(st, fb);
+
+    /* Trails behind the planet discs — additive so newest sample blends
+     * into the planet glow seamlessly. */
+    if (st->show_trails) trails_draw(st, fb);
 
     /* Sun position projected unclipped — needed even when below the horizon
      * to orient the lunar terminator on the night side. */
@@ -612,10 +867,15 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
         AstroStyle s = style_for((EphemBody)i);
         if ((EphemBody)i == EPHEM_MOON) {
             stamp_moon(fb, sx, sy, sun_sx, sun_sy, &s, st->moon_elongation);
+        } else if ((EphemBody)i == EPHEM_SATURN) {
+            stamp_saturn(fb, sx, sy, &s, st->jd);
         } else {
             stamp_body(fb, sx, sy, &s);
         }
     }
+
+    /* Galilean moons — drawn last so they stamp over Jupiter's halo. */
+    galilean_draw(st, fb);
 }
 
 static int p_byte(float v) {
@@ -623,6 +883,28 @@ static int p_byte(float v) {
     if (i < 0)   i = 0;
     if (i > 255) i = 255;
     return i;
+}
+
+/* Find the above-horizon body whose cell-projection is nearest to (col,
+ * row). Returns -1 if no body is above the horizon or all are far. */
+static int find_nearest_body(const AstroState *st, int cols, int rows,
+                             int col, int row) {
+    int best = -1;
+    double best_d2 = 1e18;
+    for (int i = 0; i < EPHEM_COUNT; i++) {
+        const EphemPosition *p = &st->pos[i];
+        if (p->alt_rad < 0.0) continue;
+        float sx, sy;
+        if (project(cols * 2, rows * 4, p->alt_rad, p->az_rad, &sx, &sy) != 0)
+            continue;
+        double bx = sx / 2.0;
+        double by = sy / 4.0;
+        double dx = bx - col;
+        double dy = (by - row) * 2.0;          /* cells are ~2:1 in screen */
+        double d2 = dx * dx + dy * dy;
+        if (d2 < best_d2) { best_d2 = d2; best = i; }
+    }
+    return best;
 }
 
 void astro_labels(const AstroState *st, FILE *out, int cols, int rows) {
@@ -672,6 +954,27 @@ void astro_labels(const AstroState *st, FILE *out, int cols, int rows) {
                 p_byte(g_palette.hud.g * k),
                 p_byte(g_palette.hud.b * k));
         fprintf(out, "\x1b[%d;%dH%s", cy, cx, ephem_short((EphemBody)i));
+    }
+
+    /* Cursor reticle in cursor-mode. Drawn last so it sits over labels.
+     * Uses HUD palette at full intensity. */
+    if (st->cursor_active) {
+        int cx = st->cursor_col;
+        int cy = st->cursor_row;
+        if (cx < 1) cx = 1;
+        if (cy < 1) cy = 1;
+        if (cx > cols) cx = cols;
+        if (cy > rows) cy = rows;
+        fprintf(out, "\x1b[38;2;%d;%d;%dm",
+                p_byte(g_palette.hud.r),
+                p_byte(g_palette.hud.g),
+                p_byte(g_palette.hud.b));
+        /* Crosshair: '-' on left/right, '|' above/below, '+' centre. */
+        if (cx > 1)        fprintf(out, "\x1b[%d;%dH-", cy, cx - 1);
+        if (cx < cols)     fprintf(out, "\x1b[%d;%dH-", cy, cx + 1);
+        if (cy > 1)        fprintf(out, "\x1b[%d;%dH|", cy - 1, cx);
+        if (cy < rows)     fprintf(out, "\x1b[%d;%dH|", cy + 1, cx);
+        fprintf(out, "\x1b[%d;%dH+", cy, cx);
     }
     fputs("\x1b[0m", out);
 }
@@ -740,6 +1043,12 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
         fprintf(out, "\x1b[1;%dH[ NO BODIES ABOVE HORIZON ]", cols - 30);
     } else {
         int sel = visible[((int)(t / 6.0)) % n_vis];
+        /* Cursor mode pins the panel to the body nearest the reticle. */
+        if (st->cursor_active) {
+            int near = find_nearest_body(st, cols, rows,
+                                         st->cursor_col, st->cursor_row);
+            if (near >= 0) sel = near;
+        }
         const EphemPosition *p = &st->pos[sel];
         int x0 = cols - 32 + 1;
         fprintf(out, "\x1b[1;%dH[ %-9s  %3.0f\xC2\xB0 alt %3.0f\xC2\xB0 az ]",
