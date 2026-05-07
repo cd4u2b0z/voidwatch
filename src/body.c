@@ -4,6 +4,7 @@
 #include "body.h"
 #include "config.h"
 #include "palette.h"
+#include "vwconfig.h"
 
 static const Color PLANET_PALETTE[] = {
     { 0.70f, 0.62f, 0.50f }, /* desert  */
@@ -44,7 +45,7 @@ int body_system_init(BodySystem *bs, int sub_w, int sub_h) {
     star->color     = g_palette.star_g;
     star->kind      = BODY_STAR;
 
-    float gm = GRAVITY_G * CENTRAL_MASS;
+    float gm = g_config.gravity_g * CENTRAL_MASS;
 
     /* Planets in roughly-circular orbits, random initial phase, all CCW. */
     for (int i = 0; i < PLANET_COUNT; i++) {
@@ -148,7 +149,7 @@ void body_step(BodySystem *bs, float dt) {
             float r2 = dx * dx + dy * dy + GRAVITY_SOFTEN_SQ;
             float inv_r  = 1.0f / sqrtf(r2);
             float inv_r3 = inv_r * inv_r * inv_r;
-            float f = GRAVITY_G * b[j].mass * inv_r3;
+            float f = g_config.gravity_g * b[j].mass * inv_r3;
             ax += f * dx;
             ay += f * dy;
         }

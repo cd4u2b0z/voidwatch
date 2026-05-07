@@ -17,6 +17,7 @@
 #include "render.h"
 #include "starfield.h"
 #include "term.h"
+#include "vwconfig.h"
 
 /* Fixed-timestep physics so orbits stay stable when frames stall.
  * Decoupled from the render rate; the loop accumulates dt and steps
@@ -61,6 +62,8 @@ static void print_help(const char *argv0) {
         "  --no-audio             skip audio capture entirely (no ALSA, no FFT)\n"
         "  --theme <path>         load a key=value palette file\n"
         "                         (auto: $XDG_CONFIG_HOME/voidwatch/theme.conf)\n"
+        "  --config <path>        load a TOML/INI runtime config file\n"
+        "                         (auto: $XDG_CONFIG_HOME/voidwatch/config.toml)\n"
         "  -h, --help             show this help and exit\n"
         "\n"
         "Astro mode location resolves in this order:\n"
@@ -74,12 +77,13 @@ static void print_help(const char *argv0) {
 }
 
 int main(int argc, char **argv) {
-    const char *device     = NULL;
-    const char *theme_path = NULL;
-    int         no_audio   = 0;
-    int         astro_mode = 0;
-    double      cli_lat    = NAN;
-    double      cli_lon    = NAN;
+    const char *device      = NULL;
+    const char *theme_path  = NULL;
+    const char *config_path = NULL;
+    int         no_audio    = 0;
+    int         astro_mode  = 0;
+    double      cli_lat     = NAN;
+    double      cli_lon     = NAN;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -126,6 +130,12 @@ int main(int argc, char **argv) {
                 return 2;
             }
             theme_path = argv[++i];
+        } else if (strcmp(a, "--config") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "voidwatch: --config requires a path.\n");
+                return 2;
+            }
+            config_path = argv[++i];
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
             print_help(argv[0]);
             return 0;
@@ -142,6 +152,7 @@ int main(int argc, char **argv) {
 
     srand((unsigned)time(NULL));
     palette_autoload(theme_path);
+    vwconfig_autoload(config_path);
 
     AstroState astro = {0};
     if (astro_mode) {
@@ -340,7 +351,7 @@ int main(int argc, char **argv) {
         float rcam_x = cam_x + shake_x;
         float rcam_y = cam_y + shake_y;
 
-        if (FB_DECAY < 0.999f) fb_decay(&fb, FB_DECAY);
+        if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
         else                   fb_clear(&fb);
 
         nebula_draw(&fb, rcam_x, rcam_y, t_total, &snap);

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "asteroid.h"
 #include "audio.h"
 #include "comet.h"
 #include "ephem.h"
@@ -60,6 +61,9 @@ typedef struct {
 
     /* Bundled comets: state recomputed each frame in astro_update. */
     CometState     comets[COMET_COUNT];
+
+    /* Bundled asteroids: same pattern. */
+    AsteroidState  asteroids[ASTEROID_COUNT];
 } AstroState;
 
 /* Compute every body's geocentric + topocentric position from `now`. */

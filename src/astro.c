@@ -6,6 +6,7 @@
 #include "framebuffer.h"
 #include "palette.h"
 #include "skydata.h"
+#include "vwconfig.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -82,6 +83,19 @@ void astro_update(AstroState *st, time_t now) {
         ephem_to_topocentric(&tmp, &st->observer, st->jd);
         st->comets[i].alt_rad = tmp.alt_rad;
         st->comets[i].az_rad  = tmp.az_rad;
+    }
+
+    /* Asteroids: same shape. */
+    asteroid_compute_all(st->jd, st->asteroids);
+    for (int i = 0; i < ASTEROID_COUNT; i++) {
+        EphemPosition tmp = {
+            .ra_rad      = st->asteroids[i].ra_rad,
+            .dec_rad     = st->asteroids[i].dec_rad,
+            .distance_au = st->asteroids[i].dist_au,
+        };
+        ephem_to_topocentric(&tmp, &st->observer, st->jd);
+        st->asteroids[i].alt_rad = tmp.alt_rad;
+        st->asteroids[i].az_rad  = tmp.az_rad;
     }
 
     trails_capture(st);
@@ -851,6 +865,56 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
     }
 }
 
+/* === Tier 4c: asteroids ============================================= *
+ *
+ * Stamped as small fuzzy points — neutral grey tint, no tail, no halo.
+ * Mag-gated like comets so the table doesn't litter the sky with
+ * invisible dots. Picks closer than the comet cutoff because asteroids
+ * are typically dimmer (Vesta peaks ~5.1, Ceres ~6.6).
+ */
+static void asteroids_draw(const AstroState *st, Framebuffer *fb) {
+    Color tint_base = { 0.85f, 0.82f, 0.75f };   /* neutral rocky grey */
+    for (int i = 0; i < ASTEROID_COUNT; i++) {
+        const AsteroidState *a = &st->asteroids[i];
+        if (!a->valid || a->alt_rad < 0.0) continue;
+        if (a->mag > g_config.asteroid_mag_cutoff) continue;
+
+        float sx, sy;
+        if (project(fb->sub_w, fb->sub_h, a->alt_rad, a->az_rad, &sx, &sy) != 0)
+            continue;
+
+        float intensity = powf(1.7f, 1.0f - (float)a->mag);
+        if (intensity > 1.2f) intensity = 1.2f;
+        if (intensity < 0.05f) continue;
+
+        Color tint = tint_base;
+        apply_extinction(a->alt_rad, &tint, &intensity);
+
+        float sigma = 0.85f;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 2.5f;
+        int x0 = (int)floorf(sx - box);
+        int x1 = (int)ceilf (sx + box);
+        int y0 = (int)floorf(sy - box);
+        int y1 = (int)ceilf (sy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float dy = (float)y - sy;
+            for (int x = x0; x <= x1; x++) {
+                float dx = (float)x - sx;
+                float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                float k = t * intensity;
+                if (k < 0.005f) continue;
+                fb_add(fb, x, y,
+                       tint.r * k, tint.g * k, tint.b * k);
+            }
+        }
+    }
+}
+
 /* === Tier 4b: comets ================================================ *
  *
  * Bundled set in `comet.c`. Per frame we project each comet that's above
@@ -861,15 +925,13 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
  * scales with brightness and inverse heliocentric distance, so close-to-
  * Sun apparitions look properly impressive.
  */
-#define COMET_MAG_CUTOFF 8.0
-
 static void comets_draw(const AstroState *st, Framebuffer *fb,
                         float sun_sx, float sun_sy) {
     Color head_tint = { 0.85f, 0.95f, 1.00f };   /* cool blue-white */
     for (int i = 0; i < COMET_COUNT; i++) {
         const CometState *c = &st->comets[i];
         if (!c->valid || c->alt_rad < 0.0) continue;
-        if (c->mag > COMET_MAG_CUTOFF) continue;
+        if (c->mag > g_config.comet_mag_cutoff) continue;
 
         float sx, sy;
         if (project(fb->sub_w, fb->sub_h, c->alt_rad, c->az_rad, &sx, &sy) != 0)
@@ -1271,6 +1333,9 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
      * crossing a comet still reads brightest. */
     comets_draw(st, fb, sun_sx, sun_sy);
 
+    /* Asteroids — dim, neutral, no tail. Same composite slot. */
+    asteroids_draw(st, fb);
+
     /* Meteors above everything else — they're the brightest, fastest
      * thing in the sky when active. */
     meteors_step(st, fb);
@@ -1285,23 +1350,55 @@ static int p_byte(float v) {
 }
 
 /* Find the above-horizon body whose cell-projection is nearest to (col,
- * row). Returns -1 if no body is above the horizon or all are far. */
-static int find_nearest_body(const AstroState *st, int cols, int rows,
-                             int col, int row) {
-    int best = -1;
+ * row). Walks planets, comets, and asteroids; meteors excluded because
+ * they're transient particles. */
+typedef enum {
+    PICK_NONE = 0,
+    PICK_PLANET,
+    PICK_COMET,
+    PICK_ASTEROID,
+} PickKind;
+
+typedef struct {
+    PickKind kind;
+    int      idx;
+} CursorPick;
+
+static double pick_d2(int sub_w, int sub_h, double alt, double az,
+                      int col, int row) {
+    float sx, sy;
+    if (project(sub_w, sub_h, alt, az, &sx, &sy) != 0) return 1e18;
+    double bx = sx / 2.0;
+    double by = sy / 4.0;
+    double dx = bx - col;
+    double dy = (by - row) * 2.0;     /* cells are ~2:1 in screen */
+    return dx * dx + dy * dy;
+}
+
+static CursorPick find_nearest_target(const AstroState *st, int cols, int rows,
+                                      int col, int row) {
+    CursorPick best = { PICK_NONE, -1 };
     double best_d2 = 1e18;
+    int sub_w = cols * 2, sub_h = rows * 4;
     for (int i = 0; i < EPHEM_COUNT; i++) {
-        const EphemPosition *p = &st->pos[i];
-        if (p->alt_rad < 0.0) continue;
-        float sx, sy;
-        if (project(cols * 2, rows * 4, p->alt_rad, p->az_rad, &sx, &sy) != 0)
-            continue;
-        double bx = sx / 2.0;
-        double by = sy / 4.0;
-        double dx = bx - col;
-        double dy = (by - row) * 2.0;          /* cells are ~2:1 in screen */
-        double d2 = dx * dx + dy * dy;
-        if (d2 < best_d2) { best_d2 = d2; best = i; }
+        if (st->pos[i].alt_rad < 0.0) continue;
+        double d2 = pick_d2(sub_w, sub_h, st->pos[i].alt_rad,
+                            st->pos[i].az_rad, col, row);
+        if (d2 < best_d2) { best_d2 = d2; best.kind = PICK_PLANET; best.idx = i; }
+    }
+    for (int i = 0; i < COMET_COUNT; i++) {
+        if (!st->comets[i].valid || st->comets[i].alt_rad < 0.0) continue;
+        if (st->comets[i].mag > g_config.comet_mag_cutoff)      continue;
+        double d2 = pick_d2(sub_w, sub_h, st->comets[i].alt_rad,
+                            st->comets[i].az_rad, col, row);
+        if (d2 < best_d2) { best_d2 = d2; best.kind = PICK_COMET; best.idx = i; }
+    }
+    for (int i = 0; i < ASTEROID_COUNT; i++) {
+        if (!st->asteroids[i].valid || st->asteroids[i].alt_rad < 0.0) continue;
+        if (st->asteroids[i].mag > g_config.asteroid_mag_cutoff)       continue;
+        double d2 = pick_d2(sub_w, sub_h, st->asteroids[i].alt_rad,
+                            st->asteroids[i].az_rad, col, row);
+        if (d2 < best_d2) { best_d2 = d2; best.kind = PICK_ASTEROID; best.idx = i; }
     }
     return best;
 }
@@ -1438,16 +1535,40 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
     for (int i = 0; i < EPHEM_COUNT; i++) {
         if (st->pos[i].alt_rad >= 0.0) visible[n_vis++] = i;
     }
-    if (n_vis == 0) {
+    /* Cursor mode: dispatch on whatever's nearest the reticle. */
+    CursorPick pick = { PICK_NONE, -1 };
+    if (st->cursor_active) {
+        pick = find_nearest_target(st, cols, rows,
+                                   st->cursor_col, st->cursor_row);
+    }
+
+    if (pick.kind == PICK_COMET) {
+        const CometState     *c  = &st->comets[pick.idx];
+        const CometElements  *ce = &comet_elements[pick.idx];
+        int x0 = cols - 32 + 1;
+        fprintf(out, "\x1b[1;%dH[ %-22s ]", x0, ce->name);
+        fprintf(out, "\x1b[2;%dH  alt %3.0f\xC2\xB0  az %3.0f\xC2\xB0",
+                x0, c->alt_rad * RAD2DEG, c->az_rad * RAD2DEG);
+        fprintf(out, "\x1b[3;%dH  Mag  %+5.2f", x0, c->mag);
+        fprintf(out, "\x1b[4;%dH  Dist %5.2f AU", x0, c->dist_au);
+        fprintf(out, "\x1b[5;%dH  r    %5.2f AU", x0, c->r_helio_au);
+    }
+    else if (pick.kind == PICK_ASTEROID) {
+        const AsteroidState    *a  = &st->asteroids[pick.idx];
+        const AsteroidElements *ae = &asteroid_elements[pick.idx];
+        int x0 = cols - 32 + 1;
+        fprintf(out, "\x1b[1;%dH[ %-22s ]", x0, ae->name);
+        fprintf(out, "\x1b[2;%dH  alt %3.0f\xC2\xB0  az %3.0f\xC2\xB0",
+                x0, a->alt_rad * RAD2DEG, a->az_rad * RAD2DEG);
+        fprintf(out, "\x1b[3;%dH  Mag  %+5.2f", x0, a->mag);
+        fprintf(out, "\x1b[4;%dH  Dist %5.2f AU", x0, a->dist_au);
+        fprintf(out, "\x1b[5;%dH  r    %5.2f AU", x0, a->r_helio_au);
+    }
+    else if (n_vis == 0) {
         fprintf(out, "\x1b[1;%dH[ NO BODIES ABOVE HORIZON ]", cols - 30);
     } else {
         int sel = visible[((int)(t / 6.0)) % n_vis];
-        /* Cursor mode pins the panel to the body nearest the reticle. */
-        if (st->cursor_active) {
-            int near = find_nearest_body(st, cols, rows,
-                                         st->cursor_col, st->cursor_row);
-            if (near >= 0) sel = near;
-        }
+        if (pick.kind == PICK_PLANET) sel = pick.idx;
         const EphemPosition *p = &st->pos[sel];
         int x0 = cols - 32 + 1;
         fprintf(out, "\x1b[1;%dH[ %-9s  %3.0f\xC2\xB0 alt %3.0f\xC2\xB0 az ]",

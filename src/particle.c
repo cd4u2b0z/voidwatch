@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "particle.h"
+#include "vwconfig.h"
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 static float frand_signed(void) { return frand() * 2.0f - 1.0f; }
@@ -153,7 +154,7 @@ static void apply_gravity(const BodySystem *bs, float px, float py,
         float r2 = dx * dx + dy * dy + GRAVITY_SOFTEN_SQ;
         float inv_r  = 1.0f / sqrtf(r2);
         float inv_r3 = inv_r * inv_r * inv_r;
-        float f = GRAVITY_G * b->mass * inv_r3;
+        float f = g_config.gravity_g * b->mass * inv_r3;
         ax_acc += f * dx;
         ay_acc += f * dy;
     }
