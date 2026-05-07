@@ -133,6 +133,16 @@ static void milkyway_init(void) {
     mw_inited = 1;
 }
 
+/* Bennett (1982) atmospheric refraction: true altitude → apparent.
+ * R in arcminutes; valid for h0 ≥ -1°. Below that we leave the body alone
+ * (it's well under the horizon — refraction can't lift it visibly). */
+static double refraction_arcmin(double h_true_rad) {
+    double h_deg = h_true_rad * RAD2DEG;
+    if (h_deg < -1.0) return 0.0;
+    double t = (h_deg + 7.31 / (h_deg + 4.4)) * DEG2RAD;
+    return 1.0 / tan(t);
+}
+
 static void radec_to_altaz(double ra, double dec, double lat,
                            double lst_rad, double *alt, double *az) {
     double H = lst_rad - ra;
@@ -140,10 +150,133 @@ static void radec_to_altaz(double ra, double dec, double lat,
     if (sin_alt >  1.0) sin_alt =  1.0;
     if (sin_alt < -1.0) sin_alt = -1.0;
     *alt = asin(sin_alt);
+    /* Apparent altitude: lift by atmospheric refraction (~0.5° at horizon,
+     * ~1' at 45°, negligible near zenith). Net effect: bodies stay visible
+     * a beat after geometric horizon-set. */
+    *alt += refraction_arcmin(*alt) * (DEG2RAD / 60.0);
     double y = -cos(dec) * sin(H);
     double x =  sin(dec) * cos(lat) - cos(dec) * sin(lat) * cos(H);
     *az = atan2(y, x);
     if (*az < 0.0) *az += 2.0 * M_PI;
+}
+
+/* Kasten-Young (1989) airmass — accurate to the horizon. X=1 at zenith,
+ * X≈38 at the horizon. */
+static double airmass(double alt_rad) {
+    double h_deg = alt_rad * RAD2DEG;
+    if (h_deg < 0.0) h_deg = 0.0;
+    double denom = sin(alt_rad)
+                 + 0.50572 * pow(h_deg + 6.07995, -1.6364);
+    if (denom < 1e-6) denom = 1e-6;
+    return 1.0 / denom;
+}
+
+/* Apply atmospheric extinction + reddening to a tint at given altitude.
+ * `intensity` is scaled by V-band extinction; the colour channels lose
+ * blue faster than red. k chosen lower than real-world (0.28) to keep
+ * horizon-line objects legible — terminal aesthetic over photometric
+ * truth. */
+static void apply_extinction(double alt_rad, Color *tint, float *intensity) {
+    double X = airmass(alt_rad);
+    /* V-band: 0.18 mag/airmass — gentler than reality for legibility. */
+    double dim_mag = 0.18 * (X - 1.0);
+    if (dim_mag < 0.0) dim_mag = 0.0;
+    float dim = (float)pow(10.0, -0.4 * dim_mag);
+    *intensity *= dim;
+    /* Reddening: blue dims faster than green than red. */
+    double extra_b = 0.10 * (X - 1.0);
+    double extra_g = 0.04 * (X - 1.0);
+    if (extra_b < 0.0) extra_b = 0.0;
+    if (extra_g < 0.0) extra_g = 0.0;
+    tint->b *= (float)pow(10.0, -0.4 * extra_b);
+    tint->g *= (float)pow(10.0, -0.4 * extra_g);
+}
+
+/* ---- Twilight horizon glow --------------------------------------------
+ *
+ * When the Sun is below but near the horizon, civil/nautical/astronomical
+ * twilight tints the sky. We render this as a band hugging the horizon
+ * ring, brightest in the azimuth quadrant facing the Sun, fading both
+ * upward in altitude and around the sky. fb_max so it doesn't smear with
+ * decay/LST drift.
+ */
+static float twilight_factor(double sun_alt_rad) {
+    double h = sun_alt_rad * RAD2DEG;
+    if (h >=  0.0) return 0.0f;        /* sun up — no twilight render */
+    if (h >= -2.0) return 1.0f;
+    if (h >= -6.0) return 1.0f - 0.45f * (float)((-2.0 - h) / 4.0);
+    if (h >= -12.0) return 0.55f - 0.40f * (float)((-6.0 - h) / 6.0);
+    if (h >= -18.0) return 0.15f * (float)(1.0 - (-12.0 - h) / 6.0);
+    return 0.0f;
+}
+
+static void twilight_draw(const AstroState *st, Framebuffer *fb) {
+    double sun_alt = st->pos[EPHEM_SUN].alt_rad;
+    float k = twilight_factor(sun_alt);
+    if (k <= 0.0f) return;
+
+    /* Colour shifts through twilight bands: warm pink-orange just after
+     * sunset, cool deep blue at astronomical. Lerp between two anchors. */
+    double h_deg = sun_alt * RAD2DEG;
+    float warm_w = 0.0f;
+    if (h_deg >= -6.0) warm_w = (float)((h_deg + 6.0) / 6.0);   /* 0..1 */
+    if (warm_w < 0.0f) warm_w = 0.0f;
+    if (warm_w > 1.0f) warm_w = 1.0f;
+    Color warm = { 1.00f, 0.55f, 0.45f };   /* civil pink-orange */
+    Color cool = { 0.30f, 0.45f, 0.85f };   /* nautical/astro blue */
+    Color tint = {
+        warm.r * warm_w + cool.r * (1.0f - warm_w),
+        warm.g * warm_w + cool.g * (1.0f - warm_w),
+        warm.b * warm_w + cool.b * (1.0f - warm_w),
+    };
+
+    /* Sun azimuth — twilight is brightest in the Sun's quadrant. */
+    double sun_az = st->pos[EPHEM_SUN].az_rad;
+
+    /* Walk azimuth × low altitudes, stamp small Gaussians. fb_max so
+     * stars/MW can still poke through brighter. */
+    for (int azd = 0; azd < 360; azd += 2) {
+        double az = azd * DEG2RAD;
+        /* Cosine of azimuth offset from Sun: 1 facing Sun, -1 opposite. */
+        double daz = az - sun_az;
+        double azimuth_w = 0.5 + 0.5 * cos(daz);    /* 0..1 */
+        /* Wrap-around — even the anti-Sun side gets some glow during civil. */
+        azimuth_w = 0.30 + 0.70 * azimuth_w;
+
+        for (int altd = 0; altd <= 22; altd += 2) {
+            double alt = altd * DEG2RAD;
+            float sx, sy;
+            if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
+
+            /* Gaussian falloff in altitude — 0 brightest, ~22° gone. */
+            float alt_fall = expf(-(altd * altd) / (2.0f * 9.0f * 9.0f));
+            float v = k * (float)azimuth_w * alt_fall * 0.55f;
+            if (v < 0.01f) continue;
+
+            float sigma = 2.0f;
+            float two_sigma_sq = 2.0f * sigma * sigma;
+            float box = sigma * 2.5f;
+            int x0 = (int)floorf(sx - box);
+            int x1 = (int)ceilf (sx + box);
+            int y0 = (int)floorf(sy - box);
+            int y1 = (int)ceilf (sy + box);
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+            if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+
+            for (int y = y0; y <= y1; y++) {
+                float dy = (float)y - sy;
+                for (int x = x0; x <= x1; x++) {
+                    float dx = (float)x - sx;
+                    float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                    float w = t * v;
+                    if (w < 0.005f) continue;
+                    fb_max(fb, x, y, tint.r * w, tint.g * w, tint.b * w);
+                }
+            }
+        }
+    }
 }
 
 static void milkyway_draw(const AstroState *st, Framebuffer *fb) {
@@ -172,10 +305,12 @@ static void milkyway_draw(const AstroState *st, Framebuffer *fb) {
         if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
 
         float w = (float)mw_points[i].weight;
-        /* Slight altitude fade: lower sky reads dimmer (atmospheric stub). */
-        float k = (float)(alt / (M_PI * 0.5));
-        if (k < 0.3f) k = 0.3f;
-        w *= k;
+        /* Real airmass extinction — Milky Way reddens + dims into the
+         * horizon haze just like the stars do. */
+        Color mw_tint = tint;
+        float mw_intensity = w;
+        apply_extinction(alt, &mw_tint, &mw_intensity);
+        w = mw_intensity;
 
         int x0 = (int)floorf(sx - box_x);
         int x1 = (int)ceilf (sx + box_x);
@@ -195,7 +330,7 @@ static void milkyway_draw(const AstroState *st, Framebuffer *fb) {
                 float t  = expf(-(dx*dx) / two_sx2 - (dy*dy) / two_sy2);
                 float v  = t * w;
                 if (v < 0.005f) continue;
-                fb_max(fb, x, y, tint.r * v, tint.g * v, tint.b * v);
+                fb_max(fb, x, y, mw_tint.r * v, mw_tint.g * v, mw_tint.b * v);
             }
         }
     }
@@ -267,12 +402,8 @@ static void stars_draw(const AstroState *st, Framebuffer *fb) {
         if (project_sky(st, fb, ra, dec, &sx, &sy, &alt) != 0) continue;
 
         float intensity = mag_to_intensity(s->mag);
-        /* Atmospheric extinction stub: dim stars near the horizon. */
-        float k = (float)(alt / (M_PI * 0.5));
-        if (k < 0.25f) k = 0.25f;
-        intensity *= 0.6f + 0.4f * k;
-
         Color tint = spectral_tint(s->spectral);
+        apply_extinction(alt, &tint, &intensity);
         float sigma = mag_to_sigma(s->mag);
         float two_sigma_sq = 2.0f * sigma * sigma;
         float box = sigma * 3.0f;
@@ -451,6 +582,10 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
 void astro_draw(const AstroState *st, Framebuffer *fb,
                 int cols, int rows, const AudioSnapshot *snap) {
     (void)cols; (void)rows; (void)snap;
+
+    /* Twilight horizon glow — only when Sun is in the twilight bands.
+     * Drawn first so MW + stars overdraw it cleanly with fb_max. */
+    twilight_draw(st, fb);
 
     /* Diffuse Milky Way wash sits behind the bodies — fb_max doesn't
      * accumulate, so re-stamping each frame is fine. */
