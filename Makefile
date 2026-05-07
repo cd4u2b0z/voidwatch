@@ -9,6 +9,8 @@ OBJ := $(SRC:.c=.o)
 DEP := $(SRC:.c=.d)
 BIN := voidwatch
 
+.DEFAULT_GOAL := all
+
 -include $(DEP)
 
 all: $(BIN)

@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "astro.h"
 #include "framebuffer.h"
@@ -495,7 +496,8 @@ static void project_unclipped(int sub_w, int sub_h, double alt, double az,
 
 static void stamp_moon(Framebuffer *fb, float cx, float cy,
                        float sun_sx, float sun_sy,
-                       const AstroStyle *s, double elongation) {
+                       const AstroStyle *s, double elongation,
+                       double eclipse_f) {
     /* On-screen direction toward the Sun. Used to orient the terminator. */
     float ddx = sun_sx - cx;
     float ddy = sun_sy - cy;
@@ -546,6 +548,14 @@ static void stamp_moon(Framebuffer *fb, float cx, float cy,
             float r  = (s->color.r * (1.0f - w) + w) * k;
             float g  = (s->color.g * (1.0f - w) + w) * k;
             float bl = (s->color.b * (1.0f - w) + w) * k;
+            /* Lunar eclipse: dim + red-shift toward "blood moon" tone.
+             * f=0 no effect, f=1 full umbra. */
+            if (eclipse_f > 0.0) {
+                float dim = 1.0f - 0.85f * (float)eclipse_f;
+                r  *= dim + 0.20f * (float)eclipse_f;
+                g  *= dim;
+                bl *= dim * (1.0f - 0.50f * (float)eclipse_f);
+            }
             fb_add(fb, x, y, r, g, bl);
         }
     }
@@ -827,6 +837,265 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
     }
 }
 
+/* === Tier 4: meteor showers ========================================= *
+ *
+ * Bundled table of major annual showers. Each entry is one shower; the
+ * activity profile is a Gaussian centred on `peak_doy` with FWHM
+ * `fwhm_days`. The active shower (max activity above floor) gates meteor
+ * spawning — at most one shower contributes at a time.
+ *
+ * Spawn model: shower's per-minute rate = ZHR * gauss(doy_offset) *
+ * sin(radiant_alt). Meteors emit from the projected radiant with
+ * outward velocity, fade over their `max_life`. Streak rendered along
+ * the velocity vector with a 14-px fading tail.
+ *
+ * No ephemeris dependency — radiant position is fixed J2000 RA/Dec
+ * (precession ~0.014°/yr, cell-irrelevant).
+ */
+typedef struct {
+    const char *name;
+    int    peak_doy;        /* 1..366 */
+    float  fwhm_days;
+    double ra_h;
+    double dec_deg;
+    int    zhr;
+} MeteorShower;
+
+static const MeteorShower meteor_showers[] = {
+    { "Quadrantids",    3, 1.0,  15.33,  49.7, 110 },
+    { "Lyrids",       112, 2.0,  18.07,  34.0,  18 },
+    { "Eta Aquariids",126, 5.0,  22.50,  -1.0,  60 },
+    { "Perseids",     224, 4.0,   3.20,  58.0, 110 },
+    { "Draconids",    281, 0.5,  17.43,  54.0,  10 },
+    { "Orionids",     294, 3.0,   6.33,  16.0,  25 },
+    { "Leonids",      321, 1.0,  10.13,  22.0,  15 },
+    { "Geminids",     348, 2.0,   7.47,  33.0, 150 },
+    { "Ursids",       356, 0.5,  14.47,  76.0,  10 },
+};
+static const int meteor_shower_count =
+    (int)(sizeof meteor_showers / sizeof meteor_showers[0]);
+
+#define METEOR_POOL 96
+
+typedef struct {
+    float sx, sy;
+    float vx, vy;
+    float life, max_life;
+    float intensity;
+    int   active;
+} Meteor;
+
+static Meteor   met_pool[METEOR_POOL];
+static double   met_spawn_accum = 0.0;
+static unsigned met_rng = 0xC0FFEEu;
+
+static unsigned met_rand32(void) {
+    met_rng = met_rng * 1103515245u + 12345u;
+    return (met_rng >> 16) & 0xFFFFu;
+}
+static float met_randf(void) {
+    return (float)met_rand32() / 65535.0f;
+}
+
+static double doy_from_jd(double jd) {
+    /* 1..366 day-of-year, modulo Julian year. Sufficient for shower
+     * windows measured in days; calendar-exact DOY isn't worth the cost. */
+    double frac = jd - 2451544.5;
+    double yfrac = fmod(frac / 365.25, 1.0);
+    if (yfrac < 0.0) yfrac += 1.0;
+    return yfrac * 365.25 + 1.0;
+}
+
+static const MeteorShower *meteor_active_shower(double jd, float *out_rate_min) {
+    double doy = doy_from_jd(jd);
+    const MeteorShower *best = NULL;
+    float best_rate = 0.0f;
+    for (int i = 0; i < meteor_shower_count; i++) {
+        const MeteorShower *s = &meteor_showers[i];
+        double d = doy - s->peak_doy;
+        if (d >  200.0) d -= 365.25;
+        if (d < -200.0) d += 365.25;
+        float sigma = s->fwhm_days / 2.355f;
+        if (sigma < 0.1f) sigma = 0.1f;
+        float gauss = expf(-(float)(d * d) / (2.0f * sigma * sigma));
+        float rate  = (float)s->zhr * gauss;       /* per hour, ZHR units */
+        if (rate > best_rate) { best_rate = rate; best = s; }
+    }
+    if (out_rate_min) *out_rate_min = best_rate / 60.0f;
+    return best;
+}
+
+static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
+                                  double dt);
+static void meteors_step(const AstroState *st, Framebuffer *fb) {
+    /* Self-paced from CLOCK_MONOTONIC so this works regardless of how
+     * often astro_draw is called. Independent of the astro virtual
+     * clock — meteors are a render-rate effect, not an ephemeris one. */
+    static struct timespec last;
+    static int have_last = 0;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double dt = 0.0;
+    if (have_last) {
+        dt = (now.tv_sec  - last.tv_sec)
+           + (now.tv_nsec - last.tv_nsec) * 1e-9;
+        if (dt > 0.25) dt = 0.25;          /* clamp on stalls */
+    }
+    last = now;
+    have_last = 1;
+    meteors_step_internal(st, fb, dt);
+}
+
+static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
+                                  double dt) {
+    /* Tick existing meteors. */
+    for (int i = 0; i < METEOR_POOL; i++) {
+        if (!met_pool[i].active) continue;
+        met_pool[i].sx += met_pool[i].vx * (float)dt;
+        met_pool[i].sy += met_pool[i].vy * (float)dt;
+        met_pool[i].life -= (float)dt;
+        if (met_pool[i].life <= 0.0f) met_pool[i].active = 0;
+    }
+
+    float rate_per_min = 0.0f;
+    const MeteorShower *sh = meteor_active_shower(st->jd, &rate_per_min);
+    if (!sh || rate_per_min < 0.05f) return;
+
+    double ra  = sh->ra_h * (M_PI / 12.0);
+    double dec = sh->dec_deg * DEG2RAD;
+    double lst_rad = st->lst_hours * (M_PI / 12.0);
+    double alt, az;
+    radec_to_altaz(ra, dec, st->observer.lat_rad, lst_rad, &alt, &az);
+    if (alt < 0.05) return;             /* radiant below horizon */
+    float rx, ry;
+    if (project(fb->sub_w, fb->sub_h, alt, az, &rx, &ry) != 0) return;
+
+    /* ZHR is "if radiant at zenith" — multiply by sin(alt). */
+    float rate_per_sec = (rate_per_min / 60.0f) * (float)sin(alt);
+    met_spawn_accum += rate_per_sec * dt;
+
+    while (met_spawn_accum >= 1.0) {
+        met_spawn_accum -= 1.0;
+        int slot = -1;
+        for (int i = 0; i < METEOR_POOL; i++) {
+            if (!met_pool[i].active) { slot = i; break; }
+        }
+        if (slot < 0) break;
+        Meteor *m = &met_pool[slot];
+        float ang    = met_randf() * 2.0f * (float)M_PI;
+        float spread = met_randf() * 12.0f;
+        m->sx = rx + cosf(ang) * spread;
+        m->sy = ry + sinf(ang) * spread;
+        float speed = 60.0f + met_randf() * 80.0f;
+        m->vx = cosf(ang) * speed;
+        m->vy = sinf(ang) * speed;
+        m->max_life  = 0.4f + met_randf() * 0.4f;
+        m->life      = m->max_life;
+        m->intensity = 0.7f + met_randf() * 0.6f;
+        m->active    = 1;
+    }
+}
+
+static void meteors_draw(Framebuffer *fb) {
+    for (int i = 0; i < METEOR_POOL; i++) {
+        if (!met_pool[i].active) continue;
+        const Meteor *m = &met_pool[i];
+        float age_k = m->life / m->max_life;
+        float head  = m->intensity * age_k;
+        if (head < 0.01f) continue;
+        float vlen = sqrtf(m->vx * m->vx + m->vy * m->vy);
+        if (vlen < 1e-3f) continue;
+        float ux = -m->vx / vlen;
+        float uy = -m->vy / vlen;
+        for (int s = 0; s < 14; s++) {
+            float k = head * (1.0f - (float)s / 14.0f);
+            if (k < 0.01f) break;
+            int x = (int)(m->sx + ux * s + 0.5f);
+            int y = (int)(m->sy + uy * s + 0.5f);
+            if (x < 0 || y < 0 || x >= fb->sub_w || y >= fb->sub_h) continue;
+            fb_add(fb, x, y, k, k * 0.95f, k * 0.85f);
+        }
+    }
+}
+
+/* === Tier 4: eclipses =============================================== *
+ *
+ * Detection is on real angular separation (RA/Dec), so the events fire at
+ * the same cadence as reality (≈4 a year between solar+lunar). The visual
+ * scaling is generous so the user actually sees something on a terminal.
+ *
+ *   - Solar: Moon transits Sun. After the Sun's stamp lands, dim a
+ *     Moon-sized disc at the Moon's screen position centred over the
+ *     Sun. Result: a "bite" out of the Sun, totality = full block.
+ *   - Lunar: Moon enters Earth's umbra. `stamp_moon` is fed a shadow
+ *     factor that dims the whole disc and red-shifts it (atmospheric
+ *     refraction colour through the umbra).
+ */
+static double angular_sep_rad(double ra1, double dec1, double ra2, double dec2) {
+    double c = sin(dec1) * sin(dec2)
+             + cos(dec1) * cos(dec2) * cos(ra1 - ra2);
+    if (c >  1.0) c =  1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c);
+}
+
+/* Sun + Moon angular radii sum ≈ 0.527° ≈ 0.0092 rad. We use 0.012 rad
+ * (~0.69°) so partial eclipses register a tick before perfect alignment. */
+static double solar_eclipse_factor(const AstroState *st) {
+    const EphemPosition *S = &st->pos[EPHEM_SUN];
+    const EphemPosition *M = &st->pos[EPHEM_MOON];
+    double sep = angular_sep_rad(S->ra_rad, S->dec_rad,
+                                 M->ra_rad, M->dec_rad);
+    double f = (0.012 - sep) / 0.012;
+    if (f < 0.0) f = 0.0;
+    if (f > 1.0) f = 1.0;
+    return f;
+}
+
+/* Earth umbra angular radius at Moon ≈ 0.7°, penumbra ≈ 1.3°. We trigger
+ * within 0.022 rad (~1.26°) for totality-into-penumbra. */
+static double lunar_eclipse_factor(const AstroState *st) {
+    const EphemPosition *S = &st->pos[EPHEM_SUN];
+    const EphemPosition *M = &st->pos[EPHEM_MOON];
+    double anti_ra  = S->ra_rad + M_PI;
+    double anti_dec = -S->dec_rad;
+    double sep = angular_sep_rad(anti_ra, anti_dec,
+                                 M->ra_rad, M->dec_rad);
+    double f = (0.022 - sep) / 0.022;
+    if (f < 0.0) f = 0.0;
+    if (f > 1.0) f = 1.0;
+    return f;
+}
+
+/* Bite a Moon-shaped dim disc out of the Sun, centred at Moon's screen
+ * position. f=1.0: full block (totality). f<1: partial — Moon disc still
+ * stamped same size but at lower opacity. */
+static void apply_solar_eclipse(Framebuffer *fb,
+                                float moon_sx, float moon_sy,
+                                float moon_R, float f) {
+    float box = moon_R * 3.0f;
+    int x0 = (int)floorf(moon_sx - box);
+    int x1 = (int)ceilf (moon_sx + box);
+    int y0 = (int)floorf(moon_sy - box);
+    int y1 = (int)ceilf (moon_sy + box);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+    if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+    for (int y = y0; y <= y1; y++) {
+        float dy = (float)y - moon_sy;
+        for (int x = x0; x <= x1; x++) {
+            float dx = (float)x - moon_sx;
+            float t = expf(-(dx*dx + dy*dy) / (2.0f * moon_R * moon_R));
+            float dim = 1.0f - t * f;
+            float *p = &fb->data[(y * fb->sub_w + x) * 3];
+            p[0] *= dim;
+            p[1] *= dim;
+            p[2] *= dim;
+        }
+    }
+}
+
 void astro_draw(const AstroState *st, Framebuffer *fb,
                 int cols, int rows, const AudioSnapshot *snap) {
     (void)cols; (void)rows; (void)snap;
@@ -859,6 +1128,15 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
                       st->pos[EPHEM_SUN].az_rad,
                       &sun_sx, &sun_sy);
 
+    /* Eclipse factors computed once per frame. */
+    double solar_f = solar_eclipse_factor(st);
+    double lunar_f = lunar_eclipse_factor(st);
+
+    /* Cache Moon's screen position for the solar-eclipse overlay. */
+    int   moon_visible = 0;
+    float moon_sx_cached = 0, moon_sy_cached = 0;
+    AstroStyle moon_style = style_for(EPHEM_MOON);
+
     for (int i = 0; i < EPHEM_COUNT; i++) {
         const EphemPosition *p = &st->pos[i];
         float sx, sy;
@@ -866,7 +1144,10 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
             continue;
         AstroStyle s = style_for((EphemBody)i);
         if ((EphemBody)i == EPHEM_MOON) {
-            stamp_moon(fb, sx, sy, sun_sx, sun_sy, &s, st->moon_elongation);
+            stamp_moon(fb, sx, sy, sun_sx, sun_sy, &s,
+                       st->moon_elongation, lunar_f);
+            moon_visible = 1;
+            moon_sx_cached = sx; moon_sy_cached = sy;
         } else if ((EphemBody)i == EPHEM_SATURN) {
             stamp_saturn(fb, sx, sy, &s, st->jd);
         } else {
@@ -874,8 +1155,21 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
         }
     }
 
+    /* Solar eclipse: dim a Moon-sized region centred on the Moon over the
+     * Sun's stamp. Only meaningful when both are above horizon. */
+    if (solar_f > 0.0 && moon_visible &&
+        st->pos[EPHEM_SUN].alt_rad > 0.0) {
+        apply_solar_eclipse(fb, moon_sx_cached, moon_sy_cached,
+                            moon_style.radius_sub, (float)solar_f);
+    }
+
     /* Galilean moons — drawn last so they stamp over Jupiter's halo. */
     galilean_draw(st, fb);
+
+    /* Meteors above everything else — they're the brightest, fastest
+     * thing in the sky when active. */
+    meteors_step(st, fb);
+    meteors_draw(fb);
 }
 
 static int p_byte(float v) {
