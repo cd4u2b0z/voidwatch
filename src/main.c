@@ -15,6 +15,7 @@
 #include "palette.h"
 #include "particle.h"
 #include "render.h"
+#include "headless.h"
 #include "starfield.h"
 #include "term.h"
 #include "vwconfig.h"
@@ -64,6 +65,13 @@ static void print_help(const char *argv0) {
         "                         (auto: $XDG_CONFIG_HOME/voidwatch/theme.conf)\n"
         "  --config <path>        load a TOML/INI runtime config file\n"
         "                         (auto: $XDG_CONFIG_HOME/voidwatch/config.toml)\n"
+        "\n"
+        "Headless / one-shot modes (compute, print, exit):\n"
+        "  --tonight              text summary of what's worth watching tonight\n"
+        "  --print-state          full ephemeris + comets + asteroids (text)\n"
+        "  --print-state --json   same as JSON\n"
+        "  --next <body>          next rise time for a planet/comet/asteroid\n"
+        "\n"
         "  -h, --help             show this help and exit\n"
         "\n"
         "Astro mode location resolves in this order:\n"
@@ -80,10 +88,13 @@ int main(int argc, char **argv) {
     const char *device      = NULL;
     const char *theme_path  = NULL;
     const char *config_path = NULL;
+    const char *next_body   = NULL;
     int         no_audio    = 0;
     int         astro_mode  = 0;
     double      cli_lat     = NAN;
     double      cli_lon     = NAN;
+    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT } headless = HL_NONE;
+    int         json_output = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -136,6 +147,19 @@ int main(int argc, char **argv) {
                 return 2;
             }
             config_path = argv[++i];
+        } else if (strcmp(a, "--tonight") == 0) {
+            headless = HL_TONIGHT;
+        } else if (strcmp(a, "--print-state") == 0) {
+            headless = HL_PRINT_STATE;
+        } else if (strcmp(a, "--json") == 0) {
+            json_output = 1;
+        } else if (strcmp(a, "--next") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "voidwatch: --next requires a body name.\n");
+                return 2;
+            }
+            headless = HL_NEXT;
+            next_body = argv[++i];
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
             print_help(argv[0]);
             return 0;
@@ -153,6 +177,25 @@ int main(int argc, char **argv) {
     srand((unsigned)time(NULL));
     palette_autoload(theme_path);
     vwconfig_autoload(config_path);
+
+    /* Headless / one-shot modes: compute, print, exit. No terminal init,
+     * no audio, no render loop. Location resolution is the only state we
+     * need from the regular pipeline. */
+    if (headless != HL_NONE) {
+        Observer obs = {0};
+        int fb_loc = 0;
+        if (location_resolve(cli_lat, cli_lon, &obs, &fb_loc) != 0) {
+            fprintf(stderr, "voidwatch: invalid latitude/longitude.\n");
+            return 2;
+        }
+        time_t now = time(NULL);
+        switch (headless) {
+            case HL_TONIGHT:     return headless_tonight(&obs, now, stdout);
+            case HL_PRINT_STATE: return headless_print_state(&obs, now, stdout, json_output);
+            case HL_NEXT:        return headless_next_rise(&obs, now, next_body, stdout);
+            case HL_NONE: break;
+        }
+    }
 
     AstroState astro = {0};
     if (astro_mode) {
