@@ -326,6 +326,15 @@ void ephem_compute(EphemBody body, double jd, EphemPosition *out) {
     }
 }
 
+void ephem_earth_helio_xyz(double jd, double *x, double *y, double *z) {
+    helio_xyz(&EARTH, jd, x, y, z);
+}
+
+double ephem_obliquity_rad(double jd) {
+    double T = (jd - J2000) / 36525.0;
+    return mean_obliquity_rad(T);
+}
+
 double ephem_local_sidereal_hours(double jd, double lon_east_rad) {
     /* GMST formula from Meeus 12.4 (good ~1 arcsec). */
     double T = (jd - J2000) / 36525.0;

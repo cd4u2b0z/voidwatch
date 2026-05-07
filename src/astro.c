@@ -70,6 +70,20 @@ void astro_update(AstroState *st, time_t now) {
     st->moon_elongation = (dra >= 0.0) ? sep : (2.0 * M_PI - sep);
     st->moon_illum      = (1.0 - cos_sep) * 0.5;
 
+    /* Comets: ephemeris in equatorial coords, then topocentric pass to
+     * fill alt/az for each. */
+    comet_compute_all(st->jd, st->comets);
+    for (int i = 0; i < COMET_COUNT; i++) {
+        EphemPosition tmp = {
+            .ra_rad      = st->comets[i].ra_rad,
+            .dec_rad     = st->comets[i].dec_rad,
+            .distance_au = st->comets[i].dist_au,
+        };
+        ephem_to_topocentric(&tmp, &st->observer, st->jd);
+        st->comets[i].alt_rad = tmp.alt_rad;
+        st->comets[i].az_rad  = tmp.az_rad;
+    }
+
     trails_capture(st);
 }
 
@@ -837,6 +851,92 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
     }
 }
 
+/* === Tier 4b: comets ================================================ *
+ *
+ * Bundled set in `comet.c`. Per frame we project each comet that's above
+ * the horizon and bright enough (mag < cutoff). The head is a small
+ * fuzzy stamp (Gaussian σ scaled by magnitude); the tail is a streak of
+ * fading dots in screen-space, *anti-solar* — i.e. drawn from the comet
+ * head along the direction from Sun to comet on the screen. Tail length
+ * scales with brightness and inverse heliocentric distance, so close-to-
+ * Sun apparitions look properly impressive.
+ */
+#define COMET_MAG_CUTOFF 8.0
+
+static void comets_draw(const AstroState *st, Framebuffer *fb,
+                        float sun_sx, float sun_sy) {
+    Color head_tint = { 0.85f, 0.95f, 1.00f };   /* cool blue-white */
+    for (int i = 0; i < COMET_COUNT; i++) {
+        const CometState *c = &st->comets[i];
+        if (!c->valid || c->alt_rad < 0.0) continue;
+        if (c->mag > COMET_MAG_CUTOFF) continue;
+
+        float sx, sy;
+        if (project(fb->sub_w, fb->sub_h, c->alt_rad, c->az_rad, &sx, &sy) != 0)
+            continue;
+
+        /* Magnitude → intensity. Same slope as stars but offset down a
+         * notch so a 4-mag comet reads about as bright as a 3-mag star
+         * (comet light is diffuse). */
+        float intensity = powf(1.6f, 1.0f - (float)c->mag);
+        if (intensity > 1.6f) intensity = 1.6f;
+        if (intensity < 0.05f) continue;
+
+        Color tint = head_tint;
+        apply_extinction(c->alt_rad, &tint, &intensity);
+
+        /* Head: small Gaussian — slightly bigger σ than a star at the
+         * same magnitude, so it reads as fuzzy not point-like. */
+        float sigma = 1.4f;
+        if (c->mag < 3.0f) sigma = 2.0f;
+        if (c->mag < 0.0f) sigma = 2.6f;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 3.0f;
+        int x0 = (int)floorf(sx - box);
+        int x1 = (int)ceilf (sx + box);
+        int y0 = (int)floorf(sy - box);
+        int y1 = (int)ceilf (sy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float dy = (float)y - sy;
+            for (int x = x0; x <= x1; x++) {
+                float dx = (float)x - sx;
+                float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                float k = t * intensity;
+                if (k < 0.005f) continue;
+                fb_add(fb, x, y,
+                       tint.r * k, tint.g * k, tint.b * k);
+            }
+        }
+
+        /* Tail: anti-solar direction in screen space. Length ∝
+         * intensity / r_helio — close approaches grow, distant comets
+         * stay subtle. */
+        float ddx = sx - sun_sx;
+        float ddy = sy - sun_sy;
+        float dlen = sqrtf(ddx * ddx + ddy * ddy);
+        if (dlen < 1e-3f) continue;
+        float ux = ddx / dlen;
+        float uy = ddy / dlen;
+        float r = (float)c->r_helio_au;
+        if (r < 0.3f) r = 0.3f;
+        float tail_px = intensity * 25.0f / r;
+        if (tail_px > 70.0f) tail_px = 70.0f;
+        int n_dots = (int)tail_px;
+        for (int s = 1; s < n_dots; s++) {
+            float k = intensity * (1.0f - (float)s / n_dots) * 0.6f;
+            if (k < 0.01f) break;
+            int dx = (int)(sx + ux * s + 0.5f);
+            int dy = (int)(sy + uy * s + 0.5f);
+            if (dx < 0 || dy < 0 || dx >= fb->sub_w || dy >= fb->sub_h) continue;
+            fb_add(fb, dx, dy, tint.r * k, tint.g * k, tint.b * k);
+        }
+    }
+}
+
 /* === Tier 4: meteor showers ========================================= *
  *
  * Bundled table of major annual showers. Each entry is one shower; the
@@ -1165,6 +1265,11 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
 
     /* Galilean moons — drawn last so they stamp over Jupiter's halo. */
     galilean_draw(st, fb);
+
+    /* Comets after planets so the head can sit on top of any
+     * coincidental star/MW underlay; before meteors so a meteor streak
+     * crossing a comet still reads brightest. */
+    comets_draw(st, fb, sun_sx, sun_sy);
 
     /* Meteors above everything else — they're the brightest, fastest
      * thing in the sky when active. */

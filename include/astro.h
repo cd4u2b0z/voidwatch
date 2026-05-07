@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "audio.h"
+#include "comet.h"
 #include "ephem.h"
 #include "framebuffer.h"
 
@@ -56,6 +57,9 @@ typedef struct {
      * nearest above-horizon body is reported in the scan panel. */
     int            cursor_col, cursor_row;
     int            cursor_locked_body;   /* EphemBody index, -1 = none   */
+
+    /* Bundled comets: state recomputed each frame in astro_update. */
+    CometState     comets[COMET_COUNT];
 } AstroState;
 
 /* Compute every body's geocentric + topocentric position from `now`. */

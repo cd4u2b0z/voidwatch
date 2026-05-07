@@ -54,6 +54,15 @@ void ephem_to_topocentric(EphemPosition *pos, const Observer *obs, double jd);
 /* Local Apparent Sidereal Time, hours [0, 24). */
 double ephem_local_sidereal_hours(double jd, double lon_east_rad);
 
+/* Earth's heliocentric ecliptic position (J2000-of-date) in AU. Comets
+ * and similar Keplerian propagators subtract this to get the geocentric
+ * vector. */
+void ephem_earth_helio_xyz(double jd, double *x, double *y, double *z);
+
+/* Mean obliquity of the ecliptic at jd, radians. Exposed for converting
+ * heliocentric ecliptic vectors (comets, asteroids) to equatorial. */
+double ephem_obliquity_rad(double jd);
+
 /* Display strings. `name` is full ("Mercury"); `short_name` is 3-char
  * codes for compact HUD use ("MER"). */
 const char *ephem_name(EphemBody body);
