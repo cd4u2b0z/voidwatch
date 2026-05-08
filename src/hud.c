@@ -147,6 +147,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    m        toggle geo / helio view",
         "    s        toggle decorative star backdrop",
         "    c        toggle object cursor (hjkl move)",
+        "    click    move cursor + arm track on a body",
         "",
         "  CLI flags",
         "    --astro           real-ephemeris mode",

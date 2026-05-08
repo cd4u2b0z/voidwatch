@@ -89,7 +89,8 @@ static void print_help(const char *argv0) {
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
         "              g grid, l constellation lines, d deep-sky,\n"
         "              a aurora, t trails, m geo/helio,\n"
-        "              s star backdrop, c cursor (hjkl, Esc).\n",
+        "              s star backdrop, c cursor (hjkl, Esc),\n"
+        "              click  move cursor + arm track on a body.\n",
         argv0);
 }
 
@@ -338,6 +339,20 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &last);
 
     while (!term_should_quit() && !quitting) {
+        /* Drain queued mouse clicks this frame. Astro-only — sandbox
+         * has nothing to pick. A click lands in cell coords (1-indexed
+         * SGR), which we convert to 0-indexed for the cursor, then
+         * arm track on whatever body sits closest. */
+        if (astro_mode) {
+            int mc, mr;
+            while (term_poll_mouse(&mc, &mr)) {
+                astro.cursor_active = 1;
+                astro.cursor_col    = mc - 1;
+                astro.cursor_row    = mr - 1;
+                astro_track_arm(&astro, cols, rows);
+            }
+        }
+
         /* Drain queued keys this frame. Order is meaningful — Esc/q must
          * win even if a help/hud key sits behind it. */
         for (;;) {
