@@ -93,11 +93,15 @@ in the hot path.
 
 ### Astro  (`./voidwatch --astro`)
 
-Real ephemeris. 8870 stars (HYG v3.6.1, V ≤ 6.5), 88 IAU constellations
-(Stellarium "modern" skyculture), Sun + Moon + 8 planets via Meeus,
-Milky Way band as a longitude-weighted Perlin overlay along the J2000
-galactic equator. Bennett refraction lift, Kasten-Young airmass dimming,
-twilight horizon glow keyed off Sun altitude.
+Real ephemeris with two perspectives — geocentric (default) and
+heliocentric — toggle with **`m`**.
+
+**Geocentric** (`m` = 0): observer's all-sky view, azimuthal-equidistant
+projection from zenith. 8870 stars (HYG v3.6.1, V ≤ 6.5), 88 IAU
+constellations (Stellarium "modern" skyculture), Sun + Moon + 8 planets
+via Meeus, Milky Way band as a longitude-weighted Perlin overlay along
+the J2000 galactic equator. Bennett refraction lift, Kasten-Young
+airmass dimming, twilight horizon glow keyed off Sun altitude.
 
 Plus: lunar phase + earthshine, **solar/lunar eclipses** (real angular
 separation gating), 9 annual **meteor showers** (DOY-driven activity
@@ -105,7 +109,16 @@ profile), 6 bundled **comets** (1P/Halley, 2P/Encke, 109P/Swift-Tuttle,
 21P/Giacobini-Zinner, 67P/Churyumov-Gerasimenko, Hale-Bopp) propagated
 two-body Keplerian, 5 bundled **asteroids** (Ceres, Pallas, Vesta, Juno,
 Iris). Saturn rings tilt with the 29.46-yr ring-plane cycle. Galilean
-moons orbit Jupiter visibly.
+moons orbit Jupiter visibly. The HUD event log narrates shower activity
+and eclipses as they begin/end.
+
+**Heliocentric** (`m` = 1): top-down "looking at the solar system from
+above the ecliptic." Sun fixed at centre, Earth + 7 planets at their
+heliocentric ecliptic positions on a `sqrt(r_au)` compressed scale —
+Mercury a few sub-pixels from the Sun, Neptune at the frame edge.
+Decorative parallax star backdrop on by default (toggle with `s`).
+Crank the time-scrub and watch the inner planets whip around while
+Neptune barely moves.
 
 Time controls: `+`/`-` speed (×10 steps), `0` reset, `,`/`.` scrub ±1h.
 Cursor pick (`c` then `hjkl`) lands on planets, comets, or asteroids
@@ -148,6 +161,8 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   + / -     speed up / slow down (10x)
   0         reset speed + scrub
   , / .     scrub time -1h / +1h
+  m         toggle geo / helio view
+  s         toggle helio star backdrop
   g         toggle alt-az grid
   l         toggle constellation lines
   t         toggle planet trails
@@ -284,12 +299,17 @@ make
 - **Tier 5** — HYG v3.6.1 + Stellarium modern skyculture LANDED with
   `tools/gen_skydata.py`. Named DSO catalogue, aurora effects, GeoNames
   city lookup all open.
+- **Heliocentric view** — LANDED (`m` toggle). Top-down solar system
+  with sqrt-scaled distances. Orbital path traces, comets/asteroids in
+  helio, and a helio-specific scan readout still open.
+- **HUD event log** — LANDED. Meteor shower / eclipse activity now
+  announces on transition.
 - **Headless** — `--tonight`, `--print-state`, `--next` LANDED.
 - **Runtime config (TOML subset)** — LANDED. Inotify hot-reload still
   open.
 
-Open polish: HUD event surfacing for shower/eclipse activity, track
-mode (`T`), `--validate` self-test, audio reactivity in astro mode.
+Open polish: track mode (`T`), `--validate` self-test, in-program
+search, inotify hot-reload, audio reactivity in astro mode.
 
 Sources are fully cited in [CITATIONS.md](CITATIONS.md).
 
