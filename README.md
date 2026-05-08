@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-1.1.0-orange)
 ![C11](https://img.shields.io/badge/C-11-00599C?style=flat&logo=c&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
-![License](https://img.shields.io/badge/license-MIT%20source%20%E2%80%A2%20GPL--2.0%20binary-brightgreen)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20bundled--data%20terms-brightgreen)](LICENSE)
 ![Lines](https://img.shields.io/badge/lines-10k%20src%20%2B%201.7k%20tests%20%2B%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
@@ -33,6 +33,20 @@ real catalogues, all baked into the binary).
 → switch to heliocentric perspective → back to geocentric.)*
 
 [Quick start](#quick-start) · [Modes](#modes) · [Headless / one-shot](#headless--one-shot) · [Keys](#keys) · [Configuration](#configuration) · [Data](CITATIONS.md)
+
+---
+
+## Try it in 30 seconds
+
+```bash
+git clone https://codeberg.org/cdubz/voidwatch.git && cd voidwatch && make
+./voidwatch --astro --no-audio    # real-ephemeris planetarium
+./voidwatch --tonight             # text summary of what's up tonight
+```
+
+Linux + ALSA + FFTW3 (drop `--no-audio` to enable audio reactivity in the
+sandbox). Press `?` in-app for keys, `q` to quit. Full install / config /
+keybindings below.
 
 ---
 
