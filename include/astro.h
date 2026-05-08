@@ -50,6 +50,11 @@ typedef struct {
     int            show_trails;          /* planet RA/Dec trails (key: t)     */
     int            cursor_active;        /* object-pick cursor on (key: c)    */
 
+    /* Perspective. 0 = geocentric (default — observer's all-sky view),
+     * 1 = heliocentric (top-down "looking at the solar system from above
+     * the ecliptic"). Toggle with `m`. */
+    int            view_mode;
+
     /* Trail ring buffers per body. */
     TrailSample    trails[EPHEM_COUNT][ASTRO_TRAIL_LEN];
     int            trail_head[EPHEM_COUNT];

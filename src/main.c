@@ -81,7 +81,7 @@ static void print_help(const char *argv0) {
         "Runtime keys: h toggle HUD, ? help overlay, q/Esc quit.\n"
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
         "              g grid, l constellation lines, t trails,\n"
-        "              c cursor (then hjkl, Esc to exit).\n",
+        "              m geo/helio view, c cursor (hjkl, Esc).\n",
         argv0);
 }
 
@@ -277,6 +277,9 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && (k == 't' || k == 'T')) {
                 astro.show_trails = !astro.show_trails;
+            }
+            else if (astro_mode && (k == 'm' || k == 'M')) {
+                astro.view_mode = !astro.view_mode;
             }
             else if (astro_mode && (k == 'c' || k == 'C')) {
                 astro.cursor_active = !astro.cursor_active;

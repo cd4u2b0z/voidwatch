@@ -59,6 +59,12 @@ double ephem_local_sidereal_hours(double jd, double lon_east_rad);
  * vector. */
 void ephem_earth_helio_xyz(double jd, double *x, double *y, double *z);
 
+/* Heliocentric ecliptic position of any planet (Mercury through Neptune).
+ * Sun returns (0,0,0); Moon is rejected (its motion is geocentric — use
+ * ephem_compute and add Earth's helio if you need helio Moon). */
+void ephem_helio_xyz_for(EphemBody body, double jd,
+                         double *x, double *y, double *z);
+
 /* Mean obliquity of the ecliptic at jd, radians. Exposed for converting
  * heliocentric ecliptic vectors (comets, asteroids) to equatorial. */
 double ephem_obliquity_rad(double jd);

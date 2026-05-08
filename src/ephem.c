@@ -330,6 +330,23 @@ void ephem_earth_helio_xyz(double jd, double *x, double *y, double *z) {
     helio_xyz(&EARTH, jd, x, y, z);
 }
 
+void ephem_helio_xyz_for(EphemBody body, double jd,
+                         double *x, double *y, double *z) {
+    int idx = -1;
+    switch (body) {
+        case EPHEM_SUN:     *x = 0; *y = 0; *z = 0; return;
+        case EPHEM_MERCURY: idx = 0; break;
+        case EPHEM_VENUS:   idx = 1; break;
+        case EPHEM_MARS:    idx = 2; break;
+        case EPHEM_JUPITER: idx = 3; break;
+        case EPHEM_SATURN:  idx = 4; break;
+        case EPHEM_URANUS:  idx = 5; break;
+        case EPHEM_NEPTUNE: idx = 6; break;
+        default: *x = 0; *y = 0; *z = 0; return;
+    }
+    helio_xyz(&ELEMS[idx], jd, x, y, z);
+}
+
 double ephem_obliquity_rad(double jd) {
     double T = (jd - J2000) / 36525.0;
     return mean_obliquity_rad(T);

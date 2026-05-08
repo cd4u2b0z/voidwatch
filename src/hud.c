@@ -139,6 +139,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    g        toggle alt-az grid",
         "    l        toggle constellation lines",
         "    t        toggle planet trails",
+        "    m        toggle geo / helio view",
         "    c        toggle object cursor (hjkl move)",
         "",
         "  CLI flags",

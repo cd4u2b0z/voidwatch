@@ -1313,9 +1313,91 @@ void astro_surface_events(const AstroState *st, double t_mono) {
     prev_lunar = now_lunar;
 }
 
+/* === Heliocentric "above the ecliptic" view ========================= *
+ *
+ * Projection is top-down: heliocentric ecliptic (x, y) maps to screen,
+ * z is dropped. Distance compression is sqrt(r_au) so Mercury (0.39 AU)
+ * stays a few sub-pixels off the Sun while Neptune (30 AU) sits at the
+ * frame edge, instead of Mercury collapsing into the Sun's halo.
+ *
+ * The y axis on screen is multiplied by 2 to compensate for terminal
+ * cells being ~2× taller than wide; circular orbits then *look* circular
+ * in display pixels rather than oval.
+ *
+ * No stars, no constellations, no Milky Way — heliocentric is its own
+ * clean diagram. The horizon, alt/az, twilight, refraction, extinction
+ * — all of those are observer-frame concepts that don't exist here.
+ */
+static void helio_map_au(double cx, double cy, float r_scale,
+                         double x_au, double y_au,
+                         float *sx, float *sy) {
+    double r = sqrt(x_au * x_au + y_au * y_au);
+    double r_screen = sqrt(r) * (double)r_scale;
+    double theta = atan2(y_au, x_au);
+    *sx = (float)(cx + r_screen * cos(theta));
+    *sy = (float)(cy + r_screen * sin(theta) * 2.0);
+}
+
+static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
+    float cx = (float)fb->sub_w * 0.5f;
+    float cy = (float)fb->sub_h * 0.5f;
+    float r_max = fminf(cx, cy * 0.5f) * 0.85f;
+    /* Neptune at 30 AU sits at r_max; sqrt-scale picks the per-sqrt-AU
+     * conversion factor accordingly. */
+    float r_scale = r_max / (float)sqrt(30.5);
+
+    /* Sun at centre — slightly smaller than the geocentric stamp because
+     * the rest of the diagram is much smaller than the Sun's geocentric
+     * disc would imply. */
+    AstroStyle sun = style_for(EPHEM_SUN);
+    sun.radius_sub = 4.0f;
+    sun.intensity  = 2.2f;
+    stamp_body(fb, cx, cy, &sun);
+
+    /* Earth — explicit body in heliocentric. Cool blue dot. */
+    double ex, ey, ez;
+    ephem_earth_helio_xyz(st->jd, &ex, &ey, &ez);
+    float esx, esy;
+    helio_map_au(cx, cy, r_scale, ex, ey, &esx, &esy);
+    AstroStyle earth = { {0.45f, 0.65f, 0.95f}, 1.4f, 1.3f, 0.40f };
+    stamp_body(fb, esx, esy, &earth);
+
+    /* Other planets. */
+    for (int b = EPHEM_MERCURY; b <= EPHEM_NEPTUNE; b++) {
+        double px, py, pz;
+        ephem_helio_xyz_for((EphemBody)b, st->jd, &px, &py, &pz);
+        float sx, sy;
+        helio_map_au(cx, cy, r_scale, px, py, &sx, &sy);
+        AstroStyle s = style_for((EphemBody)b);
+        stamp_body(fb, sx, sy, &s);
+    }
+}
+
+/* Cell-coord screen position for a body in heliocentric mode. Used by
+ * astro_labels when view_mode=1. */
+static void helio_cell_for(const AstroState *st, int cols, int rows,
+                           EphemBody b, int *out_col, int *out_row) {
+    int sub_w = cols * 2, sub_h = rows * 4;
+    float cx = (float)sub_w * 0.5f;
+    float cy = (float)sub_h * 0.5f;
+    float r_max = fminf(cx, cy * 0.5f) * 0.85f;
+    float r_scale = r_max / (float)sqrt(30.5);
+    double x = 0, y = 0, z = 0;
+    ephem_helio_xyz_for(b, st->jd, &x, &y, &z);
+    float sx, sy;
+    helio_map_au(cx, cy, r_scale, x, y, &sx, &sy);
+    *out_col = (int)(sx / 2.0f);
+    *out_row = (int)(sy / 4.0f);
+}
+
 void astro_draw(const AstroState *st, Framebuffer *fb,
                 int cols, int rows, const AudioSnapshot *snap) {
     (void)cols; (void)rows; (void)snap;
+
+    if (st->view_mode == 1) {
+        astro_draw_heliocentric(st, fb);
+        return;
+    }
 
     /* Twilight horizon glow — only when Sun is in the twilight bands.
      * Drawn first so MW + stars overdraw it cleanly with fb_max. */
@@ -1461,15 +1543,61 @@ static CursorPick find_nearest_target(const AstroState *st, int cols, int rows,
 }
 
 void astro_labels(const AstroState *st, FILE *out, int cols, int rows) {
-    /* Cardinal markers — placed just *inside* the horizon ring (alt slightly
-     * above 0) so glyphs aren't clipped by the projection edge. */
-    const struct { const char *glyph; double az_deg; } cardinals[] = {
-        { "N", 0.0 }, { "E", 90.0 }, { "S", 180.0 }, { "W", 270.0 },
-    };
     int chr = p_byte(g_palette.hud.r * 0.7f);
     int chg = p_byte(g_palette.hud.g * 0.7f);
     int chb = p_byte(g_palette.hud.b * 0.7f);
     fprintf(out, "\x1b[38;2;%d;%d;%dm", chr, chg, chb);
+
+    /* Heliocentric: label every body next to its top-down position.
+     * Skip the cardinal/horizon machinery — neither concept applies. */
+    if (st->view_mode == 1) {
+        const struct { EphemBody b; const char *name; } helio_bodies[] = {
+            { EPHEM_SUN,     "SUN" },
+            { EPHEM_MERCURY, "MER" },
+            { EPHEM_VENUS,   "VEN" },
+            { EPHEM_MARS,    "MAR" },
+            { EPHEM_JUPITER, "JUP" },
+            { EPHEM_SATURN,  "SAT" },
+            { EPHEM_URANUS,  "URA" },
+            { EPHEM_NEPTUNE, "NEP" },
+        };
+        /* Earth gets its own label slot. */
+        int ecol = 0, erow = 0;
+        helio_cell_for(st, cols, rows, EPHEM_SUN, &ecol, &erow);
+        for (size_t i = 0; i < sizeof helio_bodies / sizeof helio_bodies[0]; i++) {
+            int col = 0, row = 0;
+            helio_cell_for(st, cols, rows, helio_bodies[i].b, &col, &row);
+            int lx = col + 2;
+            if (lx < 1 || lx >= cols - 4 || row < 1 || row > rows) continue;
+            fprintf(out, "\x1b[%d;%dH%s", row, lx, helio_bodies[i].name);
+        }
+        /* Earth: same approach but explicit since it isn't an EphemBody. */
+        {
+            float cx = (float)cols, cy = (float)rows;        /* tmp */
+            (void)cx; (void)cy;
+            int sub_w = cols * 2, sub_h = rows * 4;
+            float scx = (float)sub_w * 0.5f;
+            float scy = (float)sub_h * 0.5f;
+            float r_max = fminf(scx, scy * 0.5f) * 0.85f;
+            float r_scale = r_max / (float)sqrt(30.5);
+            double x, y, z;
+            ephem_earth_helio_xyz(st->jd, &x, &y, &z);
+            float sx, sy;
+            helio_map_au(scx, scy, r_scale, x, y, &sx, &sy);
+            int col = (int)(sx / 2.0f) + 2;
+            int row = (int)(sy / 4.0f);
+            if (col >= 1 && col < cols - 4 && row >= 1 && row <= rows) {
+                fprintf(out, "\x1b[%d;%dHEAR", row, col);
+            }
+        }
+        fputs("\x1b[0m", out);
+        return;
+    }
+
+    /* Geocentric — cardinal markers + body labels. */
+    const struct { const char *glyph; double az_deg; } cardinals[] = {
+        { "N", 0.0 }, { "E", 90.0 }, { "S", 180.0 }, { "W", 270.0 },
+    };
     for (size_t c = 0; c < sizeof cardinals / sizeof cardinals[0]; c++) {
         float sx, sy;
         if (project(cols * 2, rows * 4,
@@ -1563,13 +1691,19 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
     int hb = p_byte(g_palette.hud.b);
     fprintf(out, "\x1b[38;2;%d;%d;%dm", hr, hg, hb);
 
-    /* Top-left: lat/lon + LST. */
-    double lat_deg = st->observer.lat_rad * RAD2DEG;
-    double lon_deg = st->observer.lon_rad * RAD2DEG;
-    int lst_h = (int)st->lst_hours;
-    int lst_m = (int)((st->lst_hours - lst_h) * 60.0);
-    fprintf(out, "\x1b[1;1HVW  %+06.2f\xC2\xB0  %+07.2f\xC2\xB0"
-                 "  LST %02d:%02d", lat_deg, lon_deg, lst_h, lst_m);
+    /* Top-left: location/time. Geocentric shows lat/lon + LST; heliocentric
+     * shows the JD and a "HELIO" tag — observer-frame coordinates don't
+     * apply when we're rendering the solar system from above. */
+    if (st->view_mode == 1) {
+        fprintf(out, "\x1b[1;1HVW  HELIO  jd=%.4f", st->jd);
+    } else {
+        double lat_deg = st->observer.lat_rad * RAD2DEG;
+        double lon_deg = st->observer.lon_rad * RAD2DEG;
+        int lst_h = (int)st->lst_hours;
+        int lst_m = (int)((st->lst_hours - lst_h) * 60.0);
+        fprintf(out, "\x1b[1;1HVW  %+06.2f\xC2\xB0  %+07.2f\xC2\xB0"
+                     "  LST %02d:%02d", lat_deg, lon_deg, lst_h, lst_m);
+    }
 
     /* Second line shows clock state when off real-time. Negative speed isn't
      * supported yet; sub-1 speeds read as "1/N×" for legibility. */
