@@ -659,6 +659,38 @@ int headless_year(const Observer *obs, int year, FILE *out) {
         }
     }
 
+    /* === Lunar occultations of planets ============================ *
+     * Walk every 4 hours — Moon moves ~0.5°/hr so a 4-hour step covers
+     * ~2°, comfortably wider than the 0.26° threshold. Daily sampling
+     * misses closest-approach windows that last < 1h. */
+    for (int b = EPHEM_MERCURY; b <= EPHEM_NEPTUNE; b++) {
+        int active = 0;
+        double min_sep = 1e9, min_jd = 0;
+        for (double jd = jd_start; jd < jd_end; jd += 0.1667) {
+            EphemPosition mn, pl;
+            ephem_compute(EPHEM_MOON,    jd, &mn);
+            ephem_compute((EphemBody)b,  jd, &pl);
+            double s = sep_rad(mn.ra_rad, mn.dec_rad,
+                               pl.ra_rad, pl.dec_rad);
+            if (s < 0.0087) {                  /* < 0.5° */
+                active = 1;
+                if (s < min_sep) { min_sep = s; min_jd = jd; }
+            } else if (active) {
+                if (n_ev < 200) {
+                    char buf[64];
+                    jd_to_local_str(min_jd, buf, sizeof buf);
+                    ev[n_ev].jd = min_jd;
+                    snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                             "  %s  Moon close pass to %s (%.2f\xC2\xB0)",
+                             buf, ephem_name((EphemBody)b),
+                             min_sep * RAD2DEG);
+                    n_ev++;
+                }
+                active = 0; min_sep = 1e9;
+            }
+        }
+    }
+
     /* === Greatest elongations (Mercury + Venus) =================== *
      * Inferior planets reach maximum angular separation from the Sun
      * a few times per year. Track each one's elongation across the

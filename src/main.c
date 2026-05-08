@@ -356,10 +356,17 @@ int main(int argc, char **argv) {
                     if (astro.search_len > 0) {
                         double dt;
                         char display[40];
+                        int  hit_kind = 0, hit_idx = -1;
                         int rc = astro_search_body(&astro, astro.search_buf,
-                                                   &dt, display, sizeof display);
+                                                   &dt, display, sizeof display,
+                                                   &hit_kind, &hit_idx);
                         if (rc == 0) {
                             astro_offset += dt;
+                            /* Arm track on the matched body so it stays
+                             * pinned as time advances. */
+                            astro.track_active = 1;
+                            astro.track_kind   = hit_kind;
+                            astro.track_idx    = hit_idx;
                             char buf[60];
                             snprintf(buf, sizeof buf,
                                      "→ %s (in %ldh%02ldm)", display,

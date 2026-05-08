@@ -1582,6 +1582,41 @@ void astro_surface_events(const AstroState *st, double t_mono) {
     }
     prev_lunar = now_lunar;
 
+    /* Lunar close passes — Moon within ~0.5° of a planet. Strict
+     * occultations (Moon's 0.26° disc actually covering the planet)
+     * are rare from Earth's centre because they need the Moon to be
+     * exactly on the planet's line of sight; most "occultation"
+     * reports are observer-local parallax events. The 0.5° threshold
+     * fires on the visually striking close-pair moments any observer
+     * can see — same threshold as planet-planet conjunctions but
+     * applied to the Moon-planet pair. Edge-triggered. */
+    static int prev_occ[EPHEM_COUNT];
+    const double OCC_THRESHOLD = 0.0087;       /* ~0.5° in radians */
+    const EphemPosition *moon = &st->pos[EPHEM_MOON];
+    for (int i = EPHEM_MERCURY; i <= EPHEM_NEPTUNE; i++) {
+        const EphemPosition *p = &st->pos[i];
+        if (moon->alt_rad < 0.0 || p->alt_rad < 0.0) {
+            prev_occ[i] = 0;
+            continue;
+        }
+        double sep = angular_sep_rad(moon->ra_rad, moon->dec_rad,
+                                     p->ra_rad, p->dec_rad);
+        int now_occ = (sep < OCC_THRESHOLD);
+        if (now_occ && !prev_occ[i]) {
+            char buf[28];
+            snprintf(buf, sizeof buf, "Moon near %s (%.1f\xC2\xB0)",
+                     ephem_short((EphemBody)i),
+                     sep * RAD2DEG);
+            hud_log_event(t_mono, buf);
+        } else if (!now_occ && prev_occ[i]) {
+            char buf[28];
+            snprintf(buf, sizeof buf, "Moon clears %s",
+                     ephem_short((EphemBody)i));
+            hud_log_event(t_mono, buf);
+        }
+        prev_occ[i] = now_occ;
+    }
+
     /* Planet-planet conjunctions — angular separation under ~1° (anything
      * tighter is too rare; anything looser is uninteresting). Mercury
      * through Neptune only — Sun is daytime, Moon's monthly sweep would
@@ -1632,6 +1667,22 @@ static int strieq_local(const char *a, const char *b) {
     return *a == 0 && *b == 0;
 }
 
+/* Case-insensitive substring match. Used for DSO names so the user
+ * can type `m31` or `andromeda` and match "M31 Andromeda". */
+static int stristr_local(const char *haystack, const char *needle) {
+    if (!*needle) return 1;
+    while (*haystack) {
+        const char *h = haystack, *n = needle;
+        while (*h && *n) {
+            if (tolower((unsigned char)*h) != tolower((unsigned char)*n)) break;
+            h++; n++;
+        }
+        if (!*n) return 1;
+        haystack++;
+    }
+    return 0;
+}
+
 static double alt_search_planet(const Observer *obs, int idx, time_t t) {
     EphemPosition p;
     double jd = ephem_julian_day_from_unix(t);
@@ -1666,10 +1717,26 @@ static double alt_search_asteroid(const Observer *obs, int idx, time_t t) {
     return tmp.alt_rad;
 }
 
+static double alt_search_dso(const Observer *obs, int idx, time_t t) {
+    /* DSO position is fixed in J2000. Recompute alt/az from current LST. */
+    double jd = ephem_julian_day_from_unix(t);
+    double lst_h = ephem_local_sidereal_hours(jd, obs->lon_rad);
+    double lst_rad = lst_h * 15.0 * DEG2RAD;
+    double ra = dso_catalog[idx].ra_h * (M_PI / 12.0);
+    double dec = dso_catalog[idx].dec_deg * DEG2RAD;
+    double H = lst_rad - ra;
+    double sin_alt = sin(dec) * sin(obs->lat_rad)
+                   + cos(dec) * cos(obs->lat_rad) * cos(H);
+    if (sin_alt >  1.0) sin_alt =  1.0;
+    if (sin_alt < -1.0) sin_alt = -1.0;
+    return asin(sin_alt);
+}
+
 typedef double (*search_alt_fn)(const Observer *obs, int idx, time_t t);
 
 int astro_search_body(const AstroState *st, const char *name,
-                      double *out_seconds, char *display_out, size_t cap) {
+                      double *out_seconds, char *display_out, size_t cap,
+                      int *out_kind, int *out_idx) {
     /* Resolve name → (kind, idx, display) */
     int   kind = 0, idx = -1;
     const char *display = NULL;
@@ -1693,17 +1760,29 @@ int astro_search_body(const AstroState *st, const char *name,
             }
         }
     }
+    /* DSOs use substring match — names like "M31 Andromeda" should
+     * accept either "m31" or "andromeda" alone. */
+    if (kind == 0) {
+        for (int i = 0; i < dso_count; i++) {
+            if (stristr_local(dso_catalog[i].name, name)) {
+                kind = 4; idx = i; display = dso_catalog[i].name; break;
+            }
+        }
+    }
     if (kind == 0) return -1;
 
     if (display && display_out) {
         snprintf(display_out, cap, "%s", display);
     }
+    if (out_kind) *out_kind = kind;
+    if (out_idx)  *out_idx  = idx;
 
     /* Coarse 10-minute scan + bisection. Mirrors headless's
      * search_zero_crossing but specialised for "next rise" only. */
     search_alt_fn fn = (kind == 1) ? alt_search_planet
                      : (kind == 2) ? alt_search_comet
-                     :               alt_search_asteroid;
+                     : (kind == 3) ? alt_search_asteroid
+                     :               alt_search_dso;
     /* Convert st->jd back to unix time for the walker. */
     time_t now = (time_t)((st->jd - 2440587.5) * 86400.0);
     /* If body is currently above horizon, push past its next set first
@@ -2254,7 +2333,11 @@ static CursorPick find_nearest_target(const AstroState *st, int cols, int rows,
 }
 
 /* Track mode helpers — placed here so they can call find_nearest_target
- * + the PickKind enum without a forward declaration dance. */
+ * + the PickKind enum without a forward declaration dance.
+ *
+ * `kind` is the same int we use for search (1=planet, 2=comet,
+ * 3=asteroid, 4=DSO). PickKind happens to align for kinds 1-3; DSO
+ * is search-only and uses its own RA/Dec lookup. */
 static int track_cell_for(const AstroState *st, int cols, int rows,
                           int kind, int idx, int *out_col, int *out_row) {
     int sub_w = cols * 2, sub_h = rows * 4;
@@ -2268,6 +2351,12 @@ static int track_cell_for(const AstroState *st, int cols, int rows,
     } else if (kind == PICK_ASTEROID && idx >= 0 && idx < ASTEROID_COUNT) {
         alt = st->asteroids[idx].alt_rad;
         az  = st->asteroids[idx].az_rad;
+    } else if (kind == 4 /* DSO */ && idx >= 0 && idx < dso_count) {
+        /* Recompute from fixed J2000 RA/Dec + current LST. */
+        double lst_rad = st->lst_hours * (M_PI / 12.0);
+        double ra  = dso_catalog[idx].ra_h * (M_PI / 12.0);
+        double dec = dso_catalog[idx].dec_deg * DEG2RAD;
+        radec_to_altaz(ra, dec, st->observer.lat_rad, lst_rad, &alt, &az);
     } else {
         return -1;
     }

@@ -118,15 +118,18 @@ void astro_track_arm(AstroState *st, int cols, int rows);
  * astro_update so the cursor sticks for the rest of the frame. */
 void astro_track_tick(AstroState *st, int cols, int rows);
 
-/* In-program search jump. Look up a body by name (planets, comets,
- * asteroids — case-insensitive), find when it next crosses the
- * horizon going up, write the seconds-from-now offset to *out_seconds.
- * `display_out` (≥ 32 bytes) gets the matched display name.
+/* In-program search jump. Look up a body by name (planets / comets /
+ * asteroids exactly; DSOs by substring — case-insensitive), find when
+ * it next crosses the horizon going up. Writes seconds-from-now offset
+ * to *out_seconds, the display name to display_out, and the resolved
+ * (kind, idx) tag to *out_kind / *out_idx so the caller can arm track
+ * mode (kind values: 1=planet, 2=comet, 3=asteroid, 4=DSO).
  *
  * Returns 0 on hit, -1 if name doesn't match, -2 if no rise within
  * 30 days. */
 int astro_search_body(const AstroState *st, const char *name,
-                      double *out_seconds, char *display_out, size_t cap);
+                      double *out_seconds, char *display_out, size_t cap,
+                      int *out_kind, int *out_idx);
 
 /* Find the next "interesting" astronomical event after `from_jd`.
  * Walks forward in 1-day steps up to `max_days`, returning the JD of
