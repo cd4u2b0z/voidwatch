@@ -9,6 +9,12 @@ OBJ := $(SRC:.c=.o)
 DEP := $(SRC:.c=.d)
 BIN := voidwatch
 
+# Install paths. Default $(PREFIX)=$HOME/.local — user-local, no doas
+# needed, $HOME/.local/bin is already on $PATH for arch + omz setups.
+# Override at install time:  make install PREFIX=/usr/local
+PREFIX ?= $(HOME)/.local
+BINDIR  = $(PREFIX)/bin
+
 .DEFAULT_GOAL := all
 
 -include $(DEP)
@@ -30,4 +36,12 @@ astro: $(BIN)
 clean:
 	rm -f $(OBJ) $(DEP) $(BIN)
 
-.PHONY: all run astro clean
+install: $(BIN)
+	install -Dm755 $(BIN) $(BINDIR)/$(BIN)
+	@echo "installed: $(BINDIR)/$(BIN)"
+
+uninstall:
+	rm -f $(BINDIR)/$(BIN)
+	@echo "uninstalled: $(BINDIR)/$(BIN)"
+
+.PHONY: all run astro clean install uninstall

@@ -60,8 +60,17 @@ CPU on Wine.
 git clone https://codeberg.org/cdubz/voidwatch.git
 cd voidwatch
 make
-./voidwatch --astro --no-audio
+make install            # → ~/.local/bin/voidwatch (PREFIX=$HOME/.local default)
+voidwatch --astro --no-audio
 ```
+
+`make install` puts the binary on your PATH (`~/.local/bin` is in
+PATH on most modern setups; if not, override with
+`make install PREFIX=/usr/local` and `doas`). To remove:
+`make uninstall`.
+
+You can also skip install and run from the build directory with
+`./voidwatch …` — every flag works the same way.
 
 Press `?` in-app for the key reference. `q` or `Esc` to quit.
 
