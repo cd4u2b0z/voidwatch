@@ -638,6 +638,109 @@ think it's right" to "I have receipts."
 
 ---
 
+### Post-v1: hand-built SGP4 satellite tracking
+
+After v1 the obvious "what's missing" question pointed at a single
+target: real satellites. The Meeus pipeline propagates Sun/Moon/planets
+beautifully but is nothing close to the right tool for orbital objects
+that change position degree-by-degree minute-to-minute. Different
+algorithm family (SGP4), different reference frame (TEME), different
+unit conventions (rev/day, Earth radii), different staleness reality
+(TLEs decay in days). This was a separate project that bolts onto the
+same renderer.
+
+The discipline was strict: parse → init → propagate → look angles →
+render integration, **each gated by tests before the next phase
+starts**. Six phases, three commits' worth of math validated against
+Vallado's published verification vectors before a single satellite
+appeared on screen.
+
+**Phase 1 — TLE parser.** Fixed-column 69-character format. Implied
+leading decimals on eccentricity (`0006703` → `0.0006703`), implied
+decimals + signed exponents on BSTAR (` 10270-3` → `1.0270e-4`),
+mod-10 checksum verification, NORAD year pivot (00–56 → 2000–2056,
+57–99 → 1957–1999). Meeus-form Gregorian-to-JD for the epoch — *not*
+`mktime`, which is timezone-aware and would make the parser produce
+different answers depending on `TZ`. Twelve test cases against
+Vallado catalog #5 (Vanguard 1) used as the canonical TLE.
+
+**Phase 2 — Model init.** WGS-72 constants (mu, R⊕, xke, J2/J3/J4)
+in a single labeled block. Un-Kozai mean motion recovery, semi-major
+axis, perigee, atmospheric drag coefficients (cc1/cc4/cc5), secular
+rates (mdot, argpdot, nodedot), t-power coefficients (d2, d3, d4,
+t2cof–t5cof). Variable names follow Vallado/NASA SGP4.c verbatim — the
+brief was explicit: "ugly but traceable beats pretty abstraction."
+Deep-space (period ≥ 225 min) is classified but not propagated;
+voidwatch's targets are all near-Earth.
+
+**Phase 3 — Near-Earth propagation.** The actual SGP4 step: secular
+updates over time, drag, Kepler iteration, short-period periodics,
+perifocal-to-TEME orientation rotation. Output in km / km/s. The
+acceptance gate was Vallado's published `tcppver.out` vectors:
+
+| Test                  | Brief tolerance | Observed         |
+|-----------------------|-----------------|------------------|
+| Vanguard 1 (13 steps) | < 1e-3 km       | < 7e-9 km        |
+| DELTA 1 DEB (25 steps)| < 1e-6 km/s     | < 8e-10 km/s     |
+
+Seven nanometres over 4320 minutes of propagation. The code is
+bit-faithful to the reference; that's what test vectors are for.
+
+> **PRO MOVE** — When you implement a published algorithm, find its
+> reference test vectors *first* and write the test fixture before
+> writing the algorithm. You'll know within minutes whether you're
+> drifting; without the oracle you can spend days debugging "why does
+> ISS pass over my house at the wrong time."
+
+**Phase 4 — Deep-space SDP4: deferred.** Dscom/dpper/dsinit/dspace
+adds ~600 lines for lunar-solar perturbations, half-day and 1-day
+resonance, Lyddane handling. Voidwatch's intended targets (ISS,
+Hubble, NOAA, Starlink, Tiangong) are all near-Earth. Deep-space TLEs
+return `SAT_DEEP_SPACE` from init and never silently produce wrong
+answers. The body can land later without breaking the public API.
+
+**Phase 5 — TEME → topocentric.** SGP4 outputs in True Equator Mean
+Equinox ECI; voidwatch's renderer wants observer-relative alt/az.
+Pipeline: TEME → ECEF (rotate by −GMST about z), observer geodetic
+→ ECEF (WGS-72 ellipsoid), range vector, ECEF → SEZ at observer,
+asin(Z/range) for altitude, atan2(E, −S) for azimuth. Range rate from
+the projected ECEF velocity. Visual-grade — polar motion zero, no EOP
+files, no UT1−UTC. The strict-grade gate is upstream (TEME vectors).
+
+**Phase 6 — astro integration.** Bundled near-Earth catalog (ISS,
+Hubble, NOAA 19, Tiangong/CSS), internal lazy parse+init cache (parse
+each TLE once, reuse forever), single per-frame entry point
+`satellite_compute_all`. `satellites_draw` stamps sharp single-pixel
+cool-white-cyan points via `fb_max` — fb_add with decay would smear
+ISS across the sky as it moves. Compact short names in `astro_labels`
+(ISS, HST, NOAA, CSS). Cursor pick + track + search + JSON output
+extended to handle satellites alongside planets/comets/asteroids/DSOs.
+
+**Stale-TLE policy.** TLEs decay quickly. Bundled snapshots are
+demo-grade by definition. Policy:
+
+| TLE age            | Behavior                                       |
+| ------------------ | ---------------------------------------------- |
+| ≤ 7 days           | Normal brightness                              |
+| 7 < age ≤ 14 days  | Dim 50%                                        |
+| 14 < age ≤ 30 days | Hidden from render; JSON marks `stale: true`   |
+| > 30 days          | `compute_all` refuses; `valid: false`          |
+
+> **PRO MOVE** — When you bake demo data into a binary that *expires*,
+> bake an expiration policy too. Don't pretend stale TLEs are fresh
+> just because they parse. Tell the user, dim them, hide them,
+> eventually refuse them. The user will ask "where's ISS?" once and
+> then understand the policy forever.
+
+The whole satellite stack is ~1100 lines across `include/satellite.h`
+(public API), `src/satellite.c` (parser + SGP4 + topocentric +
+catalog), with the validated math sitting under three test binaries
+(`test_tle`, `test_sgp4`, `test_sgp4_propagation`) and a render-side
+smoke test (`test_satellite_look`) plus a bundled-catalog test
+(`test_satellite_bundle`). All commit-gated; all repeatable.
+
+---
+
 ## Tools of the Trade
 
 The standard library plus a handful of pillars. Each one earns its
@@ -756,6 +859,7 @@ voidwatch/
     dso.h            bundled Messier/NGC catalog
     comet.h          bundled comets + Keplerian propagation
     asteroid.h       bundled minor planets + Keplerian
+    satellite.h      hand-built SGP4 + bundled near-Earth catalog
     location.h       observer lat/lon resolution chain
     headless.h       one-shot text/JSON modes
 
@@ -898,6 +1002,17 @@ Io, Europa, Ganymede, Callisto. Period + semi-major + initial mean
 anomaly. No perturbations or Jupiter axial tilt — terminal scale
 doesn't read them. Stamped at `a_rj * jupiter.radius_sub` from
 Jupiter, flattened ×0.06 in y for ring-plane feel.
+
+### CelesTrak TLEs (4) → src/satellite.c
+
+ISS (ZARYA, NORAD 25544), HST (NORAD 20580), NOAA 19 (NORAD 33591),
+CSS Tianhe (NORAD 48274). Snapshot fetched from CelesTrak's
+`gp.php?CATNR=<n>&FORMAT=TLE` endpoint and pasted into
+`satellite_elements[]` as triple-line literals. Refresh by re-running
+the GP query when this file is older than ~14 days. Treat as demo
+seed data; the staleness gate hides anything past 14 days and refuses
+anything past 30. End users build offline; the network fetch is a
+maintainer task only.
 
 ---
 

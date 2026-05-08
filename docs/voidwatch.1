@@ -1,0 +1,290 @@
+.\" voidwatch(1) — terminal space observatory manual page
+.\" Generated 2026-05-08
+.TH VOIDWATCH 1 "2026-05-08" "voidwatch 1.0.0" "Voidwatch"
+.SH NAME
+voidwatch \- terminal space observatory: N-body sandbox + real-ephemeris planetarium with hand-built SGP4
+.SH SYNOPSIS
+.B voidwatch
+[\fB\-\-astro\fR]
+[\fB\-\-lat\fR \fIDEG\fR \fB\-\-lon\fR \fIDEG\fR]
+[\fB\-\-no\-audio\fR | \fB\-\-device\fR \fINAME\fR]
+[\fB\-\-theme\fR \fIPATH\fR]
+[\fB\-\-config\fR \fIPATH\fR]
+.PP
+.B voidwatch
+.B \-\-tonight
+| \fB\-\-print\-state\fR [\fB\-\-json\fR]
+| \fB\-\-next\fR \fIBODY\fR
+| \fB\-\-year\fR \fIYYYY\fR
+| \fB\-\-snapshot\fR [\fICOLS ROWS\fR]
+| \fB\-\-validate\fR
+[\fB\-\-at\fR \fIISODATE\fR]
+[\fB\-\-lat\fR \fIDEG\fR \fB\-\-lon\fR \fIDEG\fR]
+.SH DESCRIPTION
+.B voidwatch
+is a terminal space observatory rendered through a sub-pixel Braille
+framebuffer with phosphorescent decay. Two operating modes share one
+rendering pipeline:
+.PP
+.B Sandbox
+(default) is a phosphorescent N-body simulation: a star, five planets,
+a neutron-star companion, a black hole, and a violet nebula core
+drifting on stable symplectic-Euler orbits. Perlin-noise nebulae,
+parallax starfield, fixed-arena particle FX, audio-reactive supernovae
+on bass spikes.
+.PP
+.B Astro
+mode (\fB\-\-astro\fR) is a real-ephemeris planetarium: 8870 HYG
+catalogue stars, 88 IAU constellations, Sun + Moon + 8 planets
+(Meeus low-precision), Milky Way band, lunar phases, solar/lunar
+eclipses, 9 annual meteor showers, 6 perennial comets and 5 minor
+planets propagated two-body Keplerian, 30 named deep-sky objects
+(Messier + bright NGC), 4 bundled near-Earth satellites (ISS, Hubble,
+NOAA 19, CSS Tianhe) propagated through a hand-built SGP4 validated
+to ~7 nanometres against Vallado's published verification vectors,
+optional aurora shimmer, atmospheric refraction (Bennett 1982) and
+extinction (Kasten-Young 1989), twilight horizon glow.
+.PP
+A heliocentric "above the ecliptic" view is available via the
+\fBm\fR key; full orbital traces, Earth visible, sqrt-compressed scale.
+.PP
+Headless modes
+.RB ( \-\-tonight ", " \-\-print\-state ", " \-\-next ", " \-\-year ", "
+.B \-\-snapshot ", " \-\-validate )
+bypass terminal init, audio capture, and the render loop entirely.
+Pure compute + print + exit. JSON output suitable for piping into
+.BR jq (1).
+.SH COMMANDS
+This is a single-binary CLI; modes are selected via flags rather than
+sub-commands. The flags below are grouped by purpose.
+.SS Run modes
+.TP
+.B (none)
+Sandbox mode. N-body sim with phosphorescent trails, Perlin nebula
+wash, particle FX, audio-reactive supernovae on bass transients.
+.TP
+.B \-\-astro
+Real-ephemeris planetarium mode. All-sky azimuthal-equidistant
+projection from zenith by default; press \fBm\fR for heliocentric.
+.SS Observer
+.TP
+.B \-\-lat \fIDEG\fR
+Observer latitude (north positive). Falls back to
+\fI~/.config/voidwatch/location.conf\fR, then
+\fB$VOIDWATCH_LAT\fR, then \fI(0,0)\fR.
+.TP
+.B \-\-lon \fIDEG\fR
+Observer longitude (east positive). Same precedence.
+.SS Audio
+.TP
+.B \-\-no\-audio
+Skip ALSA capture entirely. Sandbox audio reactivity collapses to
+identity. Falls back to a periodic supernova every 90 s for visual
+pacing.
+.TP
+.B \-\-device \fINAME\fR
+Pick an ALSA PCM source (e.g. "default", "pulse", or a specific
+hardware name). Overrides
+.BR $VOIDWATCH_AUDIO_DEVICE .
+.TP
+.B \-\-list\-devices
+Print every ALSA capture source with a "(monitor)" tag on sink
+monitors and exit.
+.SS Configuration
+.TP
+.B \-\-theme \fIPATH\fR
+Load a key=value palette \fI.conf\fR (overrides
+\fI~/.config/voidwatch/theme.conf\fR).
+.TP
+.B \-\-config \fIPATH\fR
+Load a TOML/INI runtime config (overrides
+\fI~/.config/voidwatch/config.toml\fR).
+.SS Headless / one-shot
+.TP
+.B \-\-tonight
+Text summary of what's worth watching tonight: Sun/Moon, planets,
+active meteor shower, asteroids/comets brighter than the configured
+cutoffs.
+.TP
+.B \-\-print\-state " [" \-\-json ]
+Full ephemeris + comets + asteroids + bundled satellites. Plain text
+columns; with \fB\-\-json\fR, structured JSON for piping into
+.BR jq (1).
+.TP
+.B \-\-next \fIBODY\fR
+Find the next rise time for a planet, comet, asteroid, or DSO.
+Searches up to 30 days forward; prints local time and alt/az.
+.TP
+.B \-\-year \fIYYYY\fR
+Annual almanac for the given Gregorian year. Eclipses,
+planet-planet conjunctions, Moon close passes, shower peaks,
+greatest elongations, equinoxes/solstices, sorted chronologically.
+.TP
+.B \-\-snapshot " [" \fICOLS ROWS\fR ]
+Render one astro frame to stdout (ANSI truecolor + Braille) and exit.
+Default 80×40. Useful for status-bar refreshers and saved frames.
+.TP
+.B \-\-validate
+Run the internal sanity tests against Meeus's published worked
+examples and JPL Horizons references. Prints PASS/FAIL with delta
+in arcminutes for each check. Returns 0 if every test passed, 1 if
+any failed.
+.TP
+.B \-\-at \fIYYYY\-MM\-DD[Thh:mm:ss]\fR
+Seed the virtual clock at the given moment. Works with
+\fB\-\-astro\fR (live mode opens at that time, \fB,\fR/\fB.\fR/\fB+\fR/
+\fB-\fR scrub from there) and with all of the headless flags above
+(snapshot a known eclipse, replay an old conjunction, etc.).
+.SS Misc
+.TP
+.B \-V ", " \-\-version
+Print version and exit.
+.TP
+.B \-h ", " \-\-help
+Show usage and exit.
+.SH KEYS
+Both modes:
+.PP
+.RS
+.nf
+q / Esc    quit
+h          toggle HUD
+?          help overlay
+.fi
+.RE
+.PP
+Astro mode (\fB\-\-astro\fR):
+.PP
+.RS
+.nf
++ / -      time speed × 10  (faster / slower)
+0          reset speed + scrub
+, / .      scrub time -1h / +1h
+j          jump to next event (eclipse / conjunction / shower)
+/          search by name; auto-tracks the matched body
+m          toggle geo / helio view
+s          toggle decorative star backdrop
+g          toggle alt-az grid
+l          toggle constellation lines
+d          toggle deep-sky objects (M31, M42, ...)
+a          toggle aurora
+i          toggle satellites (ISS, HST, NOAA 19, CSS)
+t          toggle planet trails
+T          toggle track mode (cursor follows nearest body)
+c          toggle object cursor (then hjkl, Esc)
+click      mouse-click to move cursor + arm track on a body
+.fi
+.RE
+.SH SATELLITES
+voidwatch ships a hand-built SGP4 propagator (Hoots & Roehrich 1980;
+Vallado, Crawford, Hujsak & Kelso 2006), validated against the
+published \fBtcppver.out\fR test vectors to ~7 nanometre position
+agreement at 4320 minutes of propagation. Output frame is TEME ECI;
+look angles use a WGS-72 geodetic-to-ECEF transform with polar motion
+zero (visual-grade, not strict-grade).
+.PP
+The bundled near-Earth catalog (ISS, Hubble, NOAA 19, Tiangong/CSS)
+is fetched from CelesTrak and pasted into the binary. TLEs decay
+quickly; the staleness policy is:
+.RS
+.IP \(bu 2
+\fB≤ 7 days\fR: full brightness.
+.IP \(bu 2
+\fB7 < age ≤ 14 days\fR: dim 50%.
+.IP \(bu 2
+\fB14 < age ≤ 30 days\fR: hidden from render; JSON marks
+\fBstale: true\fR.
+.IP \(bu 2
+\fBage > 30 days\fR: refused; \fBvalid: false\fR.
+.RE
+.PP
+Deep-space TLEs (period ≥ 225 minutes — GEO, Molniya, etc.) return
+\fBSAT_DEEP_SPACE\fR from
+.B satellite_model_init
+and never silently produce wrong answers.
+.SH FILES
+.TP
+.I ~/.config/voidwatch/theme.conf
+Palette file. Key = #RRGGBB lines; auto-loaded.
+.TP
+.I ~/.config/voidwatch/config.toml
+Runtime config (visual / astro / sandbox sections); auto-loaded.
+.TP
+.I ~/.config/voidwatch/location.conf
+Observer lat/lon (\fBlat = ...\fR, \fBlon = ...\fR).
+.TP
+.I ~/.config/wallust/templates/voidwatch.conf
+Optional wallust template; \fBwset\fR regenerates the theme.
+.SH ENVIRONMENT
+.TP
+.B VOIDWATCH_LAT, VOIDWATCH_LON
+Observer location fallback when CLI flags and config file are absent.
+.TP
+.B VOIDWATCH_AUDIO_DEVICE
+ALSA PCM source name. Overridden by \fB\-\-device\fR.
+.TP
+.B PULSE_SOURCE
+Used by ALSA's PulseAudio plugin when
+.B VOIDWATCH_AUDIO_DEVICE=pulse
+to pick a specific PulseAudio source (typically a sink monitor for
+desktop-audio reactivity).
+.SH EXAMPLES
+.nf
+voidwatch                                # sandbox
+voidwatch --astro                        # planetarium
+voidwatch --astro --no-audio             # skip ALSA entirely
+
+voidwatch --tonight                      # what's up?
+voidwatch --print-state --json | jq .planets
+voidwatch --next mars                    # next rise
+voidwatch --year 2026 | grep -i eclipse  # 2026 eclipses
+voidwatch --validate                     # sanity tests vs JPL/Meeus
+
+# Halley's perihelion 2061:
+voidwatch --astro --at 2061-07-28T00:00:00
+
+# Snapshot the current ISS pass to a file:
+voidwatch --snapshot 200 50 --astro \\
+    --at 2026-05-08T10:00:00 \\
+    --lat 32.78 --lon -79.93 > frame.ans
+.fi
+.SH AUDIO ROUTING
+On PipeWire systems voidwatch's \fBdefault\fR ALSA device is the
+microphone. To react to desktop audio (Spotify, browser, etc.):
+.PP
+.RS
+.nf
+PULSE_SOURCE=$(pactl list short sources | awk '/monitor/{print $2; exit}') \\
+VOIDWATCH_AUDIO_DEVICE=pulse \\
+voidwatch
+.fi
+.RE
+.PP
+Or run voidwatch and use \fBpavucontrol\fR's Recording tab to switch
+its source to the sink monitor.
+.SH EXIT STATUS
+0 on clean exit (q / Esc / Ctrl-C, or successful headless run).
+1 on rendering / runtime failure or
+.B \-\-validate
+test failure.
+2 on argument parse failure.
+.SH SEE ALSO
+.BR jq (1),
+.BR wallust (1),
+.BR pavucontrol (1),
+.BR ncspot (1).
+.PP
+References:
+Hoots & Roehrich,
+.I Spacetrack Report No. 3
+(NORAD/USAF, 1980);
+Vallado, Crawford, Hujsak & Kelso,
+.I Revisiting Spacetrack Report #3
+(AIAA 2006-6753);
+Meeus,
+.I Astronomical Algorithms
+(Willmann-Bell, 2e, 1998).
+.PP
+Project: https://codeberg.org/cdubz/voidwatch
+.SH AUTHOR
+Dr. Baklava (cdubz) \(em https://codeberg.org/cdubz

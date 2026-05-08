@@ -8,14 +8,16 @@
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
 ![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium%20%2B%2030%20DSOs-cyan)
-![Tests](https://img.shields.io/badge/--validate-5%2F5%20passing-success)
+![Satellites](https://img.shields.io/badge/satellites-SGP4%20%C2%B17nm%20vs%20Vallado-success)
+![Tests](https://img.shields.io/badge/tests-9%2F9%20%E2%9C%93%20%E2%80%A2%20--validate%205%2F5-success)
 ![No deps](https://img.shields.io/badge/runtime%20deps-libc%20libm%20alsa%20fftw-success)
 
 Terminal space observatory. Two flavours: a phosphorescent **N-body
 sandbox** (orbital sim with chromatic body cores, Perlin nebulae, audio-
 reactive supernovae) and a real-ephemeris **planetarium** (8 planets,
 8870 stars, 88 IAU constellations, meteor showers, eclipses, comets,
-asteroids — all from real catalogues, all baked into the binary).
+asteroids, **near-Earth satellites via hand-built SGP4** , all from
+real catalogues, all baked into the binary).
 
 > *"Passive sensor feed" aesthetic — ambient, slow, never demands attention.*
 
@@ -132,8 +134,11 @@ profile), 6 bundled **comets** (1P/Halley, 2P/Encke, 109P/Swift-Tuttle,
 21P/Giacobini-Zinner, 67P/Churyumov-Gerasimenko, Hale-Bopp) propagated
 two-body Keplerian, 5 bundled **asteroids** (Ceres, Pallas, Vesta, Juno,
 Iris), 30 named **deep-sky objects** (M31 Andromeda, M42 Orion Nebula,
-M45 Pleiades, M57 Ring, Omega Centauri, etc. — toggle `d`), and
-optional **aurora** shimmer near the poleward horizon (toggle `a`).
+M45 Pleiades, M57 Ring, Omega Centauri, etc. — toggle `d`), 4 bundled
+**near-Earth satellites** (ISS, Hubble, NOAA 19, Tiangong/CSS — toggle
+`i`) propagated through a hand-built SGP4 validated to ~7 nm against
+Vallado's published vectors, and optional **aurora** shimmer near the
+poleward horizon (toggle `a`).
 Saturn rings tilt with the 29.46-yr ring-plane cycle. Galilean moons
 orbit Jupiter visibly. The HUD event log narrates shower activity and
 eclipses as they begin/end.
@@ -203,6 +208,7 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   l         toggle constellation lines
   d         toggle deep-sky objects (M31, M42, …)
   a         toggle aurora
+  i         toggle satellites (ISS, HST, NOAA 19, CSS)
   t         toggle planet trails (lowercase)
   T         toggle track mode (uppercase — cursor follows nearest body)
   c         toggle object cursor (then hjkl, Esc to exit)
@@ -345,6 +351,13 @@ make
     + Earth + 6 comets + 5 asteroids, full orbital traces, sqrt-scaled
     distances, decorative parallax backdrop, helio-specific scan
     readout (heliocentric distance + orbital period).
+- **Near-Earth satellites** — hand-built SGP4 propagator (Hoots-Roehrich
+  1980 / Vallado 2006), validated to ~7 nm position agreement against
+  the published `tcppver.out` test vectors. Bundled near-Earth catalog
+  (ISS, Hubble, NOAA 19, Tiangong/CSS) with TLE-age policy: dim past
+  7 days, hidden past 14, refused past 30. JSON output exposes age +
+  stale flag. Deep-space SDP4 is intentionally deferred (refused
+  cleanly with a status code, no silent wrong answers for GEO/Molniya).
 - **HUD event log** — narrates shower activity, eclipse begin/peak/end,
   conjunctions, Moon close passes on transition.
 - **Headless modes** — `--tonight`, `--print-state [--json]`,
@@ -360,12 +373,16 @@ make
   for arbitrary virtual time.
 
 Open (low priority polish): lunar standstills, eclipse path-of-totality,
-inotify hot-reload, audio reactivity in astro, GeoNames cities.
+inotify hot-reload, audio reactivity in astro, GeoNames cities,
+satellite next-pass prediction (search currently arms track without
+auto-jumping to next AOS), `--update-tle` opt-in fetch.
 
-Deferred indefinitely: satellites (TLE/SGP4 conflicts with no-runtime-
-data-files posture).
+Deferred indefinitely: deep-space SDP4 (every voidwatch satellite
+target is near-Earth; refusing GEO/Molniya cleanly is the right call).
 
-Sources are fully cited in [CITATIONS.md](CITATIONS.md).
+Sources are fully cited in [CITATIONS.md](CITATIONS.md). Algorithm
+references are in [ASTRONOMY.md](ASTRONOMY.md). Architecture and
+design rationale are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
