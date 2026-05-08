@@ -944,51 +944,14 @@ SatelliteStatus satellite_state_compute(const SatelliteModel *sat,
 
 /* ---- Phase 6: bundled catalog ----------------------------------------
  *
- * TLEs fetched from CelesTrak on 2026-05-08. Treat as demo seed data —
- * TLEs age fast, especially for LEO. Refresh by re-fetching from
- * https://celestrak.org/NORAD/elements/gp.php?CATNR=<n>&FORMAT=TLE
- * when this file is older than ~14 days.
- *
- * Every entry must be near-Earth (period < 225 min) — deep-space SDP4
- * is deferred. The init pass below verifies this and refuses entries
- * that would silently fall back.
+ * `satellite_elements[]` and `satellite_count` are defined in
+ * src/satdata.c, an auto-generated file. Refresh the bundled TLE
+ * snapshot by running `python3 tools/gen_satellites.py` from the repo
+ * root — it pulls each entry from CelesTrak's GP query API, validates
+ * checksums + the near-Earth period gate, and rewrites src/satdata.c.
+ * End users build with no Python and no network; the committed
+ * src/satdata.c is what ships.
  */
-
-const SatelliteElements satellite_elements[SATELLITE_COUNT] = {
-    /* International Space Station — the canonical visible-pass target */
-    {
-        .name    = "ISS (ZARYA)",
-        .line1   = "1 25544U 98067A   26128.19937109  .00004920  00000+0  96926-4 0  9998",
-        .line2   = "2 25544  51.6308 138.0417 0007476  35.9089 324.2400 15.49139257565554",
-        .aliases = "iss,zarya,25544",
-        .catalog = 25544,
-    },
-    /* Hubble Space Telescope */
-    {
-        .name    = "HST",
-        .line1   = "1 20580U 90037B   26127.97667409  .00005999  00000+0  19110-3 0  9996",
-        .line2   = "2 20580  28.4762 355.2958 0002157  58.4789 301.6018 15.30319964782400",
-        .aliases = "hst,hubble,20580",
-        .catalog = 20580,
-    },
-    /* NOAA 19 — polar weather satellite, reliable LEO sun-synchronous */
-    {
-        .name    = "NOAA 19",
-        .line1   = "1 33591U 09005A   26128.26774666  .00000018  00000+0  33300-4 0  9999",
-        .line2   = "2 33591  98.9529 199.1109 0014524 140.2237 220.0003 14.13467775888848",
-        .aliases = "noaa,noaa19,noaa-19,33591",
-        .catalog = 33591,
-    },
-    /* CSS Tianhe — Chinese space station core module */
-    {
-        .name    = "CSS (TIANHE)",
-        .line1   = "1 48274U 21035A   26128.23670278  .00021140  00000+0  22512-3 0  9992",
-        .line2   = "2 48274  41.4663 205.0585 0004840 355.4513   4.6282 15.63470026286921",
-        .aliases = "css,tianhe,tiangong,48274",
-        .catalog = 48274,
-    },
-};
-const int satellite_count = SATELLITE_COUNT;
 
 /* Cached models. Populated lazily on first satellite_compute_all call;
  * `cache_status[i]` is the init result so we don't retry every frame. */
