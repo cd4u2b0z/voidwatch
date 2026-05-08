@@ -959,8 +959,85 @@ static SatelliteModel sat_cache_models[SATELLITE_COUNT];
 static SatelliteStatus sat_cache_status[SATELLITE_COUNT];
 static int sat_cache_initialized = 0;
 
+/* Resolve user TLE cache path: $XDG_CACHE_HOME/voidwatch/tle.cache or
+ * $HOME/.cache/voidwatch/tle.cache. Returns 0 on success, -1 if neither
+ * env var is set. */
+int satellite_cache_path(char *out, size_t cap) {
+    const char *xdg = getenv("XDG_CACHE_HOME");
+    if (xdg && *xdg) {
+        snprintf(out, cap, "%s/voidwatch/tle.cache", xdg);
+        return 0;
+    }
+    const char *home = getenv("HOME");
+    if (home && *home) {
+        snprintf(out, cap, "%s/.cache/voidwatch/tle.cache", home);
+        return 0;
+    }
+    return -1;
+}
+
+/* Try to load TLEs from `path` and overlay them onto the bundled
+ * catalog by catnr. Each entry in the cache is a 3-line block (name,
+ * line1, line2) separated by blank lines; lines starting with '#' are
+ * comments. Returns count of bundled-slot overlays applied (0..N).
+ *
+ * Cache TLEs only override bundled entries with the same catnr — the
+ * cache cannot add satellites not in the bundle. Names + aliases
+ * still come from the bundled `satellite_elements[]`.
+ *
+ * Failures (parse error, checksum mismatch, deep-space) skip the
+ * affected entry; the bundled TLE for that slot stays in effect. */
+static int try_load_cache(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+
+    int overlay_count = 0;
+    char name[64], l1[80], l2[80];
+    name[0] = l1[0] = l2[0] = '\0';
+    int slot = 0;          /* 0 = expect name, 1 = expect line1, 2 = expect line2 */
+    char buf[128];
+    while (fgets(buf, sizeof buf, f)) {
+        size_t len = strlen(buf);
+        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) {
+            buf[--len] = '\0';
+        }
+        if (len == 0 || buf[0] == '#') {
+            slot = 0;
+            continue;
+        }
+        if (slot == 0) {
+            snprintf(name, sizeof name, "%s", buf);
+            slot = 1;
+        } else if (slot == 1) {
+            snprintf(l1, sizeof l1, "%s", buf);
+            slot = 2;
+        } else {
+            snprintf(l2, sizeof l2, "%s", buf);
+            slot = 0;
+            /* Got a complete 3-line block — try to parse + overlay. */
+            SatelliteTLE tle;
+            if (satellite_tle_parse(name, l1, l2, &tle) != SAT_OK) continue;
+            for (int i = 0; i < SATELLITE_COUNT; i++) {
+                if (satellite_elements[i].catalog != tle.catalog_number) continue;
+                SatelliteModel m;
+                if (satellite_model_init(&tle, &m) != SAT_OK) break;
+                if (m.deep_space) break;       /* refuse — bundled is near-Earth */
+                sat_cache_models[i] = m;
+                sat_cache_status[i] = SAT_OK;
+                overlay_count++;
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return overlay_count;
+}
+
 static void cache_init_once(void) {
     if (sat_cache_initialized) return;
+
+    /* Step 1: parse + init from bundled satellite_elements[]. This is
+     * the always-available fallback. */
     for (int i = 0; i < SATELLITE_COUNT; i++) {
         const SatelliteElements *e = &satellite_elements[i];
         SatelliteTLE tle;
@@ -975,6 +1052,14 @@ static void cache_init_once(void) {
             sat_cache_status[i] = rc;
         }
     }
+
+    /* Step 2: if user cache exists and parses, overlay matching catnrs.
+     * Failure here is non-fatal — bundled stays in effect. */
+    char cache_path[512];
+    if (satellite_cache_path(cache_path, sizeof cache_path) == 0) {
+        try_load_cache(cache_path);
+    }
+
     sat_cache_initialized = 1;
 }
 

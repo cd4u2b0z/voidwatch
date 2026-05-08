@@ -374,9 +374,7 @@ make
   for arbitrary virtual time.
 
 Open (low priority polish): lunar standstills, eclipse path-of-totality,
-inotify hot-reload, audio reactivity in astro, GeoNames cities,
-satellite next-pass prediction (search currently arms track without
-auto-jumping to next AOS), `--update-tle` opt-in fetch.
+inotify hot-reload, audio reactivity in astro, GeoNames cities.
 
 Deferred indefinitely: deep-space SDP4 (every voidwatch satellite
 target is near-Earth; refusing GEO/Molniya cleanly is the right call).

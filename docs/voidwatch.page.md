@@ -47,6 +47,10 @@
 
 `voidwatch --validate`
 
+- Refresh the bundled satellite TLEs from CelesTrak (writes to user cache; rate-limited to 2h):
+
+`voidwatch --update-tle`
+
 - Print version and exit:
 
 `voidwatch --version`

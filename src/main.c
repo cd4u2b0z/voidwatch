@@ -77,6 +77,8 @@ static void print_help(const char *argv0) {
         "                         applies to --astro and the headless modes\n"
         "  --validate             run internal sanity tests against JPL refs\n"
         "  --snapshot [cols rows] render one astro frame to stdout and exit\n"
+        "  --update-tle           refresh bundled satellite TLEs from CelesTrak\n"
+        "                         (writes to user cache; rate-limited 2h)\n"
         "\n"
         "  -V, --version          print version and exit\n"
         "  -h, --help             show this help and exit\n"
@@ -104,7 +106,7 @@ int main(int argc, char **argv) {
     int         astro_mode  = 0;
     double      cli_lat     = NAN;
     double      cli_lon     = NAN;
-    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR, HL_VALIDATE, HL_SNAPSHOT } headless = HL_NONE;
+    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR, HL_VALIDATE, HL_SNAPSHOT, HL_UPDATE_TLE } headless = HL_NONE;
     int snap_cols = 80, snap_rows = 40;
     int         json_output = 0;
     time_t      at_time     = 0;
@@ -176,6 +178,8 @@ int main(int argc, char **argv) {
             next_body = argv[++i];
         } else if (strcmp(a, "--validate") == 0) {
             headless = HL_VALIDATE;
+        } else if (strcmp(a, "--update-tle") == 0) {
+            headless = HL_UPDATE_TLE;
         } else if (strcmp(a, "--snapshot") == 0) {
             headless = HL_SNAPSHOT;
             /* Optional next two args: cols rows. Don't consume them if
@@ -262,9 +266,10 @@ int main(int argc, char **argv) {
      * no audio, no render loop. Location resolution is the only state we
      * need from the regular pipeline. */
     if (headless != HL_NONE) {
-        /* --validate doesn't need an observer — it tests geocentric
-         * positions against fixed references. Short-circuit here. */
-        if (headless == HL_VALIDATE) return headless_validate(stdout);
+        /* --validate and --update-tle don't need an observer.
+         * Short-circuit here. */
+        if (headless == HL_VALIDATE)   return headless_validate(stdout);
+        if (headless == HL_UPDATE_TLE) return headless_update_tle(stdout);
 
         Observer obs = {0};
         int fb_loc = 0;
@@ -280,6 +285,7 @@ int main(int argc, char **argv) {
             case HL_YEAR:        return headless_year(&obs, year_arg, stdout);
             case HL_SNAPSHOT:    return headless_snapshot(&obs, now, snap_cols, snap_rows, stdout);
             case HL_VALIDATE:
+            case HL_UPDATE_TLE:
             case HL_NONE: break;
         }
     }

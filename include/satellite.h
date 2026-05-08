@@ -1,6 +1,8 @@
 #ifndef VOIDWATCH_SATELLITE_H
 #define VOIDWATCH_SATELLITE_H
 
+#include <stddef.h>     /* size_t */
+
 /*
  * Hand-built TLE / SGP4 satellite tracking for voidwatch.
  *
@@ -234,6 +236,14 @@ SatelliteStatus satellite_compute_all(double jd_ut1,
  * the model failed to initialise). Used for the staleness HUD readout
  * and headless JSON output. */
 double satellite_epoch_jd(int idx);
+
+/* Path of the user TLE cache file, written by `voidwatch --update-tle`
+ * and read on first satellite_compute_all call. Honours XDG, falls
+ * back to ~/.cache/voidwatch/tle.cache. Writes the resolved path to
+ * out (cap >= 512 recommended). Returns 0 on success, -1 if neither
+ * $XDG_CACHE_HOME nor $HOME is set. Public so the updater and the
+ * loader land on the same path. */
+int satellite_cache_path(char *out, size_t cap);
 
 /* Compact display name (e.g. "ISS", "HST") used in HUD labels and as
  * search alias. Falls back to the full name if no compact form. */

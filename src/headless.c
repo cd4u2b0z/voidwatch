@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1054,5 +1055,220 @@ int headless_next_rise(const Observer *obs, time_t now,
     long m = (delta / 60) % 60;
     fprintf(out, "%s rises %s  (in %ldh%02ldm)\n",
             b.display, rise_buf, h, m);
+    return 0;
+}
+
+/* ---- --update-tle ----------------------------------------------------
+ *
+ * Opt-in refresh of the bundled satellite catalog. Shells out to curl
+ * for each catnr in satellite_elements[], validates checksums + the
+ * near-Earth period gate (same checks as tools/gen_satellites.py), and
+ * writes atomically to the user TLE cache. cache_init_once in
+ * satellite.c overlays the cache onto bundled at runtime.
+ *
+ * Not a default-on operation. The user runs `voidwatch --update-tle`
+ * explicitly. End users who never run it still get satellite tracking
+ * from the bundled snapshot — same offline-first guarantee.
+ *
+ * Rate limit: 2 hours (CelesTrak's published GP refresh cadence).
+ * Force a fetch with `voidwatch --update-tle` after `rm` ing the cache
+ * if necessary.
+ */
+
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define CELESTRAK_GP_URL_FMT \
+    "https://celestrak.org/NORAD/elements/gp.php?CATNR=%d&FORMAT=TLE"
+#define CACHE_RATE_LIMIT_SECONDS  (2L * 3600L)
+#define UPDATE_USER_AGENT \
+    "voidwatch-update-tle/1.0 (https://codeberg.org/cdubz/voidwatch)"
+
+/* Mod-10 checksum on the first 68 chars of a TLE line. */
+static int update_tle_checksum_ok(const char *line) {
+    if (strlen(line) != 69) return 0;
+    int sum = 0;
+    for (int i = 0; i < 68; i++) {
+        char c = line[i];
+        if (c >= '0' && c <= '9') sum += c - '0';
+        else if (c == '-')        sum += 1;
+    }
+    int expected = line[68] - '0';
+    return expected >= 0 && expected <= 9 && (sum % 10) == expected;
+}
+
+/* Period-gate: line 2's mean motion (rev/day) at offsets 52..62. */
+static int update_tle_near_earth(const char *line2) {
+    char buf[16] = {0};
+    if (strlen(line2) < 63) return 0;
+    memcpy(buf, line2 + 52, 11);
+    char *end;
+    double n = strtod(buf, &end);
+    if (end == buf) return 0;
+    return n > 6.4;     /* period < 225 minutes */
+}
+
+/* Make `~/.cache/voidwatch/` (or $XDG_CACHE_HOME/voidwatch) — one mkdir,
+ * EEXIST is OK. Returns 0 on success. */
+static int ensure_cache_dir(const char *cache_path) {
+    char dir[512];
+    snprintf(dir, sizeof dir, "%s", cache_path);
+    char *slash = strrchr(dir, '/');
+    if (!slash) return -1;
+    *slash = '\0';
+    /* mkdir -p only one level — XDG/HOME's parent is assumed to exist. */
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+/* Run `curl -sL <url>` and read its stdout into `out` (cap bytes). */
+static int curl_fetch(const char *url, char *out, size_t cap) {
+    char cmd[512];
+    /* User agent honours CelesTrak's request to identify clients;
+     * --max-time 20s caps the worst case. */
+    snprintf(cmd, sizeof cmd,
+             "curl -sL --max-time 20 -A '%s' '%s'",
+             UPDATE_USER_AGENT, url);
+    FILE *p = popen(cmd, "r");
+    if (!p) return -1;
+    size_t n = fread(out, 1, cap - 1, p);
+    out[n] = '\0';
+    int rc = pclose(p);
+    if (rc != 0 || n < 100) return -1;     /* obvious failure */
+    return 0;
+}
+
+int headless_update_tle(FILE *out) {
+    char cache_path[512];
+    if (satellite_cache_path(cache_path, sizeof cache_path) != 0) {
+        fprintf(stderr, "voidwatch: --update-tle: "
+                "neither $XDG_CACHE_HOME nor $HOME is set\n");
+        return 1;
+    }
+
+    /* Rate limit. Bypass by removing the cache file. */
+    struct stat st;
+    if (stat(cache_path, &st) == 0) {
+        time_t now = time(NULL);
+        long age = (long)(now - st.st_mtime);
+        if (age < CACHE_RATE_LIMIT_SECONDS) {
+            fprintf(out,
+                "voidwatch: TLE cache is %ld minutes old "
+                "(rate-limit %lds). Skipping.\n"
+                "  remove %s to force-refresh.\n",
+                age / 60, CACHE_RATE_LIMIT_SECONDS, cache_path);
+            return 0;
+        }
+    }
+
+    if (ensure_cache_dir(cache_path) != 0) {
+        fprintf(stderr, "voidwatch: --update-tle: "
+                "cannot create cache dir for %s\n", cache_path);
+        return 1;
+    }
+
+    /* Write to a temp file, rename atomically on success. */
+    char tmp_path[600];
+    snprintf(tmp_path, sizeof tmp_path, "%s.tmp", cache_path);
+    FILE *tmp = fopen(tmp_path, "w");
+    if (!tmp) {
+        fprintf(stderr, "voidwatch: --update-tle: cannot open %s for write\n",
+                tmp_path);
+        return 1;
+    }
+
+    char today[32];
+    time_t now = time(NULL);
+    struct tm tm_utc;
+    gmtime_r(&now, &tm_utc);
+    strftime(today, sizeof today, "%Y-%m-%d %H:%M:%S UTC", &tm_utc);
+
+    fprintf(tmp,
+        "# voidwatch TLE cache\n"
+        "# Refreshed: %s\n"
+        "# Source:    https://celestrak.org/NORAD/elements/gp.php\n"
+        "# Stale-policy: voidwatch dims at >7d, hides at >14d, refuses at >30d.\n"
+        "# Remove this file to revert to bundled TLEs.\n"
+        "\n", today);
+
+    int n_ok = 0, n_fail = 0;
+    fprintf(out, "voidwatch --update-tle: refreshing %d satellite(s) "
+                 "from CelesTrak\n", satellite_count);
+    for (int i = 0; i < satellite_count; i++) {
+        const SatelliteElements *e = &satellite_elements[i];
+        char url[256];
+        snprintf(url, sizeof url, CELESTRAK_GP_URL_FMT, e->catalog);
+
+        char body[1024];
+        fprintf(out, "  [%d/%d] %s (catnr %d) ... ",
+                i + 1, satellite_count, e->name, e->catalog);
+        fflush(out);
+
+        if (i > 0) sleep(1);   /* polite pacing between requests */
+
+        if (curl_fetch(url, body, sizeof body) != 0) {
+            fprintf(out, "FETCH FAILED\n");
+            n_fail++;
+            continue;
+        }
+
+        /* Three-line TLE: name, line1, line2. Strip CR/LF, find each. */
+        char *lines[3] = {NULL, NULL, NULL};
+        char *cursor = body;
+        int li = 0;
+        while (li < 3 && *cursor) {
+            while (*cursor == '\r' || *cursor == '\n' || *cursor == ' ')
+                cursor++;
+            if (!*cursor) break;
+            lines[li++] = cursor;
+            char *eol = cursor;
+            while (*eol && *eol != '\n' && *eol != '\r') eol++;
+            if (*eol) { *eol = '\0'; cursor = eol + 1; }
+            else      { cursor = eol; }
+        }
+        if (li < 3) { fprintf(out, "MALFORMED RESPONSE\n"); n_fail++; continue; }
+        /* Trim trailing spaces on the name. */
+        char *nm = lines[0];
+        size_t nm_len = strlen(nm);
+        while (nm_len > 0 && nm[nm_len-1] == ' ') nm[--nm_len] = '\0';
+
+        if (!update_tle_checksum_ok(lines[1])) {
+            fprintf(out, "BAD LINE-1 CHECKSUM\n"); n_fail++; continue;
+        }
+        if (!update_tle_checksum_ok(lines[2])) {
+            fprintf(out, "BAD LINE-2 CHECKSUM\n"); n_fail++; continue;
+        }
+        if (!update_tle_near_earth(lines[2])) {
+            fprintf(out, "NOT NEAR-EARTH\n"); n_fail++; continue;
+        }
+
+        fprintf(tmp, "%s\n%s\n%s\n\n", nm, lines[1], lines[2]);
+        fprintf(out, "ok\n");
+        n_ok++;
+    }
+
+    fclose(tmp);
+
+    if (n_ok == 0) {
+        unlink(tmp_path);
+        fprintf(stderr,
+            "voidwatch: --update-tle: 0 satellites refreshed; cache unchanged.\n"
+            "  Network issue? CelesTrak rate-limit? Try again later.\n");
+        return 1;
+    }
+
+    if (rename(tmp_path, cache_path) != 0) {
+        unlink(tmp_path);
+        fprintf(stderr, "voidwatch: --update-tle: rename to %s failed\n",
+                cache_path);
+        return 1;
+    }
+
+    fprintf(out, "voidwatch: %d/%d refreshed -> %s\n",
+            n_ok, satellite_count, cache_path);
+    if (n_fail > 0) {
+        fprintf(out, "  %d satellite(s) failed; bundled TLE in effect for those.\n",
+                n_fail);
+    }
     return 0;
 }

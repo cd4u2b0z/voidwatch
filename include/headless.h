@@ -51,4 +51,19 @@ int headless_validate(FILE *out);
 int headless_snapshot(const Observer *obs, time_t now,
                       int cols, int rows, FILE *out);
 
+/* `voidwatch --update-tle` — opt-in refresh of the bundled satellite
+ * catalog. Shells out to `curl` for each bundled catnr, validates,
+ * writes atomically to $XDG_CACHE_HOME/voidwatch/tle.cache (or
+ * ~/.cache/voidwatch/tle.cache). Rate-limited: refuses to refetch if
+ * the cache is less than 2 hours old (CelesTrak's published cadence).
+ *
+ * The cache, when present and parseable, overrides the bundled
+ * satellite_elements[] at runtime. The bundled tables stay intact so
+ * a fresh `git clone` still works offline. Removing the cache file
+ * reverts to bundled.
+ *
+ * Returns 0 on success, non-zero on partial / total failure. Errors
+ * print to stderr; success prints a brief summary to `out`. */
+int headless_update_tle(FILE *out);
+
 #endif

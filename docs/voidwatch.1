@@ -130,6 +130,22 @@ examples and JPL Horizons references. Prints PASS/FAIL with delta
 in arcminutes for each check. Returns 0 if every test passed, 1 if
 any failed.
 .TP
+.B \-\-update\-tle
+Refresh the bundled satellite TLE catalog from CelesTrak. Shells out
+to
+.BR curl (1)
+for each bundled NORAD catalog number, validates the mod-10
+checksum on each line, gates the near-Earth period (< 225 min),
+and writes atomically to
+.IR $XDG_CACHE_HOME/voidwatch/tle.cache
+(or
+.IR ~/.cache/voidwatch/tle.cache ).
+On subsequent runs, the cache overrides bundled TLEs by catalog
+number. Removing the cache file reverts to bundled. Rate-limited to
+no more often than every 2 hours per CelesTrak guidance — remove
+the cache file to force-refresh sooner. Opt-in only; voidwatch
+never auto-fetches.
+.TP
 .B \-\-at \fIYYYY\-MM\-DD[Thh:mm:ss]\fR
 Seed the virtual clock at the given moment. Works with
 \fB\-\-astro\fR (live mode opens at that time, \fB,\fR/\fB.\fR/\fB+\fR/
