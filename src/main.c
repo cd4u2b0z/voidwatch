@@ -342,10 +342,63 @@ int main(int argc, char **argv) {
             /* In astro cursor mode hjkl move the reticle instead of toggling
              * HUD. `c` toggles cursor mode; Esc exits cursor mode if active,
              * else quits. */
+            /* Search prompt swallows nearly every key (alphanumerics +
+             * space + - go into the buffer; Enter triggers; Esc cancels;
+             * backspace deletes). Place this branch first so q/T/h etc.
+             * type into the prompt instead of toggling. */
+            if (astro_mode && astro.search_active) {
+                if (k == 27) {
+                    /* cancel */
+                    astro.search_active = 0;
+                    astro.search_len    = 0;
+                    astro.search_buf[0] = '\0';
+                } else if (k == '\r' || k == '\n') {
+                    if (astro.search_len > 0) {
+                        double dt;
+                        char display[40];
+                        int rc = astro_search_body(&astro, astro.search_buf,
+                                                   &dt, display, sizeof display);
+                        if (rc == 0) {
+                            astro_offset += dt;
+                            char buf[60];
+                            snprintf(buf, sizeof buf,
+                                     "→ %s (in %ldh%02ldm)", display,
+                                     (long)dt / 3600,
+                                     ((long)dt / 60) % 60);
+                            hud_log_event(t_total, buf);
+                        } else if (rc == -1) {
+                            char buf[40];
+                            snprintf(buf, sizeof buf, "no match: %s",
+                                     astro.search_buf);
+                            hud_log_event(t_total, buf);
+                        } else {
+                            hud_log_event(t_total, "no rise within 30 days");
+                        }
+                    }
+                    astro.search_active = 0;
+                    astro.search_len    = 0;
+                    astro.search_buf[0] = '\0';
+                } else if (k == 127 || k == 8) {     /* backspace */
+                    if (astro.search_len > 0) {
+                        astro.search_len--;
+                        astro.search_buf[astro.search_len] = '\0';
+                    }
+                } else if (k >= 32 && k < 127
+                           && astro.search_len < (int)sizeof astro.search_buf - 1) {
+                    astro.search_buf[astro.search_len++] = (char)k;
+                    astro.search_buf[astro.search_len]   = '\0';
+                }
+                continue;       /* skip rest of normal keymap */
+            }
             if (k == 'q' || k == 'Q') { quitting = 1; break; }
             else if (k == 27) {
                 if (astro_mode && astro.cursor_active) astro.cursor_active = 0;
                 else                                    { quitting = 1; break; }
+            }
+            else if (astro_mode && k == '/') {
+                astro.search_active = 1;
+                astro.search_len    = 0;
+                astro.search_buf[0] = '\0';
             }
             else if (astro_mode && astro.cursor_active &&
                      (k == 'h' || k == 'j' || k == 'k' || k == 'l')) {

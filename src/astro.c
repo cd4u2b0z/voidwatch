@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
@@ -1619,6 +1620,139 @@ void astro_surface_events(const AstroState *st, double t_mono) {
     }
 }
 
+/* === In-program search jump (`/`) =================================== */
+
+static int strieq_local(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = (char)tolower((unsigned char)*a);
+        char cb = (char)tolower((unsigned char)*b);
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static double alt_search_planet(const Observer *obs, int idx, time_t t) {
+    EphemPosition p;
+    double jd = ephem_julian_day_from_unix(t);
+    ephem_compute((EphemBody)idx, jd, &p);
+    ephem_to_topocentric(&p, obs, jd);
+    return p.alt_rad;
+}
+
+static double alt_search_comet(const Observer *obs, int idx, time_t t) {
+    double jd = ephem_julian_day_from_unix(t);
+    CometState states[COMET_COUNT];
+    comet_compute_all(jd, states);
+    EphemPosition tmp = {
+        .ra_rad = states[idx].ra_rad,
+        .dec_rad = states[idx].dec_rad,
+        .distance_au = states[idx].dist_au,
+    };
+    ephem_to_topocentric(&tmp, obs, jd);
+    return tmp.alt_rad;
+}
+
+static double alt_search_asteroid(const Observer *obs, int idx, time_t t) {
+    double jd = ephem_julian_day_from_unix(t);
+    AsteroidState states[ASTEROID_COUNT];
+    asteroid_compute_all(jd, states);
+    EphemPosition tmp = {
+        .ra_rad = states[idx].ra_rad,
+        .dec_rad = states[idx].dec_rad,
+        .distance_au = states[idx].dist_au,
+    };
+    ephem_to_topocentric(&tmp, obs, jd);
+    return tmp.alt_rad;
+}
+
+typedef double (*search_alt_fn)(const Observer *obs, int idx, time_t t);
+
+int astro_search_body(const AstroState *st, const char *name,
+                      double *out_seconds, char *display_out, size_t cap) {
+    /* Resolve name → (kind, idx, display) */
+    int   kind = 0, idx = -1;
+    const char *display = NULL;
+    for (int i = 0; i < EPHEM_COUNT; i++) {
+        if (strieq_local(ephem_name((EphemBody)i),  name)
+         || strieq_local(ephem_short((EphemBody)i), name)) {
+            kind = 1; idx = i; display = ephem_name((EphemBody)i); break;
+        }
+    }
+    if (kind == 0) {
+        for (int i = 0; i < COMET_COUNT; i++) {
+            if (strieq_local(comet_elements[i].name, name)) {
+                kind = 2; idx = i; display = comet_elements[i].name; break;
+            }
+        }
+    }
+    if (kind == 0) {
+        for (int i = 0; i < ASTEROID_COUNT; i++) {
+            if (strieq_local(asteroid_elements[i].name, name)) {
+                kind = 3; idx = i; display = asteroid_elements[i].name; break;
+            }
+        }
+    }
+    if (kind == 0) return -1;
+
+    if (display && display_out) {
+        snprintf(display_out, cap, "%s", display);
+    }
+
+    /* Coarse 10-minute scan + bisection. Mirrors headless's
+     * search_zero_crossing but specialised for "next rise" only. */
+    search_alt_fn fn = (kind == 1) ? alt_search_planet
+                     : (kind == 2) ? alt_search_comet
+                     :               alt_search_asteroid;
+    /* Convert st->jd back to unix time for the walker. */
+    time_t now = (time_t)((st->jd - 2440587.5) * 86400.0);
+    /* If body is currently above horizon, push past its next set first
+     * so we land on a *rise* not the present moment. */
+    double cur = fn(&st->observer, idx, now);
+    if (cur > 0.0) {
+        const long step = 600;
+        const long horizon = 30L * 86400L;
+        double prev = cur;
+        for (long s = step; s <= horizon; s += step) {
+            time_t t = now + s;
+            double a = fn(&st->observer, idx, t);
+            if (prev > 0.0 && a <= 0.0) {
+                now = t + 60;     /* nudge past horizon */
+                break;
+            }
+            prev = a;
+        }
+    }
+    /* Now search forward for next rise. */
+    const long step = 600;
+    const long horizon = 30L * 86400L;
+    double prev = fn(&st->observer, idx, now);
+    for (long s = step; s <= horizon; s += step) {
+        time_t t = now + s;
+        double a = fn(&st->observer, idx, t);
+        if (prev < 0.0 && a >= 0.0) {
+            /* Bisect (now+s-step, now+s). */
+            time_t lo = now + s - step, hi = t;
+            double lo_alt = prev;
+            for (int it = 0; it < 24; it++) {
+                time_t mid = lo + (hi - lo) / 2;
+                if (mid == lo || mid == hi) break;
+                double mid_alt = fn(&st->observer, idx, mid);
+                if ((mid_alt < 0.0) == (lo_alt < 0.0)) {
+                    lo = mid; lo_alt = mid_alt;
+                } else {
+                    hi = mid;
+                }
+            }
+            time_t target = lo + (hi - lo) / 2;
+            *out_seconds = (double)(target - (time_t)((st->jd - 2440587.5) * 86400.0));
+            return 0;
+        }
+        prev = a;
+    }
+    return -2;
+}
+
 /* Walk forward one day at a time looking for any event. Cheap enough
  * (Meeus is fast) that scanning a year takes a few hundred ms. Used by
  * the `J` key in main.c — jumps the virtual clock to the next event. */
@@ -2368,6 +2502,12 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
         } else if (lf > 0.05) {
             fprintf(out, "\x1b[3;1H  ECLIPSE lunar %.2f", lf);
         }
+    }
+
+    /* Search prompt at the bottom row when active. Vim-style: '/' opens,
+     * keystrokes append, Enter triggers, Esc cancels. */
+    if (st->search_active) {
+        fprintf(out, "\x1b[%d;1H/ %s_", rows, st->search_buf);
     }
 
     /* Top-right: rotating panel through above-horizon bodies, dwell 6s. */

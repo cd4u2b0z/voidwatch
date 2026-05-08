@@ -83,6 +83,14 @@ typedef struct {
     int            track_kind;
     int            track_idx;
 
+    /* In-program search prompt. When `search_active` is non-zero, the
+     * HUD shows a prompt at the bottom and keystrokes are appended to
+     * `search_buf`. Enter triggers a body-name lookup + time scrub to
+     * the next rise. Esc cancels. */
+    int            search_active;
+    int            search_len;
+    char           search_buf[32];
+
     /* Bundled comets: state recomputed each frame in astro_update. */
     CometState     comets[COMET_COUNT];
 
@@ -109,6 +117,16 @@ void astro_track_arm(AstroState *st, int cols, int rows);
  * the body drops below the horizon. Called from main.c right after
  * astro_update so the cursor sticks for the rest of the frame. */
 void astro_track_tick(AstroState *st, int cols, int rows);
+
+/* In-program search jump. Look up a body by name (planets, comets,
+ * asteroids — case-insensitive), find when it next crosses the
+ * horizon going up, write the seconds-from-now offset to *out_seconds.
+ * `display_out` (≥ 32 bytes) gets the matched display name.
+ *
+ * Returns 0 on hit, -1 if name doesn't match, -2 if no rise within
+ * 30 days. */
+int astro_search_body(const AstroState *st, const char *name,
+                      double *out_seconds, char *display_out, size_t cap);
 
 /* Find the next "interesting" astronomical event after `from_jd`.
  * Walks forward in 1-day steps up to `max_days`, returning the JD of

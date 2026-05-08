@@ -137,6 +137,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    0        reset speed + scrub",
         "    , / .    scrub time -1h / +1h",
         "    j        jump to next event (eclipse / conj / shower)",
+        "    /        search: type a body name, Enter jumps to its rise",
         "    g        toggle alt-az grid",
         "    l        toggle constellation lines",
         "    d        toggle deep-sky objects",
