@@ -394,8 +394,14 @@ int main(int argc, char **argv) {
         float rcam_x = cam_x + shake_x;
         float rcam_y = cam_y + shake_y;
 
-        if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
-        else                   fb_clear(&fb);
+        /* Astro mode renders a fresh sky every frame — no decay trail.
+         * Body motion at high time-scrub would otherwise leave additive
+         * smears of every planet's recent stamps. Intentional planet
+         * trails come from the RA/Dec ring buffer (`t` toggle), not
+         * from framebuffer persistence. */
+        if (astro_mode)                      fb_clear(&fb);
+        else if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
+        else                                 fb_clear(&fb);
 
         nebula_draw(&fb, rcam_x, rcam_y, t_total, &snap);
         starfield_draw(&sf, &fb, rcam_x, rcam_y, t_total, &snap);
