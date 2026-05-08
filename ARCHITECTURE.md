@@ -609,7 +609,7 @@ They bypass terminal setup, audio init, and the render loop entirely.
 Compute, print, exit. Designed for shell-pipeline use:
 
 ```sh
-voidwatch --next mars --lat 32.7 --lon -79.9
+voidwatch --next mars --lat 51.48 --lon 0.0
 voidwatch --year 2026 | grep -i eclipse
 voidwatch --print-state --json | jq '.planets[] | select(.alt_rad > 0)'
 ```

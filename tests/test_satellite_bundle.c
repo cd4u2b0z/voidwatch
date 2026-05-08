@@ -66,8 +66,8 @@ static void test_compute_all_deterministic(void) {
      * cache is module-static, so this also implicitly tests that the
      * cached models don't accumulate per-call drift. */
     double jd = 2461168.5;   /* 2026-05-08 00:00 UT, contemporary with TLEs */
-    double lat = 32.7 * M_PI / 180.0;
-    double lon = -79.9 * M_PI / 180.0;
+    double lat = 51.48 * M_PI / 180.0;
+    double lon = 0.0   * M_PI / 180.0;
 
     SatelliteState a[SATELLITE_COUNT], b[SATELLITE_COUNT];
     assert(satellite_compute_all(jd, lat, lon, 0.0, a) == SAT_OK);

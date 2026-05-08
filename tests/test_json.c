@@ -1,7 +1,7 @@
 /* tests/test_json.c — headless --print-state --json regression.
  *
  * Runs `voidwatch --print-state --json --at 2024-04-08T18:00:00
- * --lat 32.7 --lon -79.9` and diffs the output against the checked-in
+ * --lat 51.48 --lon 0.0` and diffs the output against the checked-in
  * golden file at tests/golden/print_state.json.
  *
  * If anything in the astro pipeline changes — ephem, comet propagation,
@@ -14,7 +14,7 @@
  * Update protocol: when a *deliberate* astronomy change lands, regenerate
  * the golden with:
  *   TZ=UTC ./voidwatch --print-state --json --at 2024-04-08T18:00:00 \
- *     --lat 32.7 --lon -79.9 > tests/golden/print_state.json
+ *     --lat 51.48 --lon 0.0 > tests/golden/print_state.json
  */
 
 #include <stdio.h>
@@ -39,8 +39,8 @@ static int run_voidwatch(void) {
             "./voidwatch",
             "--print-state", "--json",
             "--at",  "2024-04-08T18:00:00",
-            "--lat", "32.7",
-            "--lon", "-79.9",
+            "--lat", "51.48",
+            "--lon", "0.0",
             NULL
         };
         execv(argv[0], argv);
@@ -124,7 +124,7 @@ int main(void) {
         fprintf(stderr,
             "  if this change is intentional, regenerate with:\n"
             "    TZ=UTC ./voidwatch --print-state --json "
-            "--at 2024-04-08T18:00:00 --lat 32.7 --lon -79.9 \\\n"
+            "--at 2024-04-08T18:00:00 --lat 51.48 --lon 0.0 \\\n"
             "      > %s\n", GOLDEN_PATH);
         rc = 1;
     } else {

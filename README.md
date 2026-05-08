@@ -54,7 +54,7 @@ keybindings below.
 
 ```
 $ voidwatch --tonight
-voidwatch — +32.78° -079.93°  2026-05-07 19:49 EDT
+voidwatch — +51.48° +000.00°  2026-05-07 23:49 UTC
 
 Body       Mag      Alt     Rise    Set
 ----       ---      ---     ----    ---
@@ -183,7 +183,7 @@ For shell scripting, status bars, and "what's up tonight?":
 voidwatch --tonight              # text summary (sample above)
 voidwatch --print-state          # text columns
 voidwatch --print-state --json   # JSON for piping
-voidwatch --next mars            # "Mars rises 2026-05-08 05:16 EDT (in 9h26m)"
+voidwatch --next mars            # "Mars rises 2026-05-08 09:16 UTC (in 9h26m)"
 voidwatch --year 2026            # full annual almanac (sorted)
 voidwatch --validate             # internal sanity tests vs JPL refs
 voidwatch --snapshot 200 60      # render one frame as ANSI to stdout
@@ -277,8 +277,8 @@ gravity_g = 0.25
 `~/.config/voidwatch/location.conf`:
 
 ```ini
-lat = 32.78
-lon = -79.93
+lat = 51.48
+lon = 0.00
 ```
 
 No network calls. No geoclue. No DBus. By design.
@@ -294,7 +294,7 @@ voidwatch --no-audio               # skip ALSA capture
 voidwatch --device <name>          # pick a PCM source
 voidwatch --list-devices           # enumerate ALSA sources
 
-voidwatch --lat 32.78 --lon -79.93 # observer location
+voidwatch --lat 51.48 --lon 0.00   # observer location
 voidwatch --theme path/to/theme.conf
 voidwatch --config path/to/config.toml
 

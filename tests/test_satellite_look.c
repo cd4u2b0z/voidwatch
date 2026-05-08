@@ -143,7 +143,7 @@ static void test_state_compute_smoke(void) {
 
     SatelliteState st;
     SatelliteStatus rc = satellite_state_compute(&sat, 0.0,
-        32.7 * M_PI / 180.0, -79.9 * M_PI / 180.0, 0.0, &st);
+        51.48 * M_PI / 180.0, 0.0 * M_PI / 180.0, 0.0, &st);
     assert(rc == SAT_OK);
     assert(st.valid);
     /* Range from any Earth observer to a 7022-km-radius orbit must be

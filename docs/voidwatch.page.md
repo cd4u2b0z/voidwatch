@@ -17,7 +17,7 @@
 
 - Set observer location explicitly (north-positive lat, east-positive lon):
 
-`voidwatch --astro --lat {{32.78}} --lon {{-79.93}}`
+`voidwatch --astro --lat {{51.48}} --lon {{0.00}}`
 
 - "What's up tonight?" — text summary of Sun/Moon/planets/asteroids + the active meteor shower:
 
@@ -39,9 +39,9 @@
 
 `voidwatch --snapshot {{120}} {{40}} --astro`
 
-- Snapshot a specific moment (e.g., the 2024 Great American Eclipse from Charleston):
+- Snapshot a specific moment (e.g., 2024 Great American Eclipse totality from Indianapolis):
 
-`voidwatch --snapshot 200 50 --astro --at {{2024-04-08T18:18:00}} --lat {{32.78}} --lon {{-79.93}}`
+`voidwatch --snapshot 200 50 --astro --at {{2024-04-08T19:06:00}} --lat {{39.77}} --lon {{-86.16}}`
 
 - Run the internal sanity tests against Meeus's published worked examples + JPL Horizons:
 

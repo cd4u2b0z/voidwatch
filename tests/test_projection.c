@@ -57,7 +57,7 @@ static int test_round_trip(int n_samples, double tol_rad) {
     for (int li = 0; li < n_lats; li++) {
         Observer obs = {
             .lat_rad = lats_deg[li] * M_PI / 180.0,
-            .lon_rad = -79.9 * M_PI / 180.0,    /* arbitrary fixed lon */
+            .lon_rad = 0.0 * M_PI / 180.0,      /* arbitrary fixed lon */
         };
 
         for (int i = 0; i < n_samples; i++) {
