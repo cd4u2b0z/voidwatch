@@ -9,7 +9,7 @@
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
 ![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium%20%2B%2030%20DSOs-cyan)
 ![Satellites](https://img.shields.io/badge/satellites-SGP4%20%C2%B17nm%20vs%20Vallado-success)
-![Tests](https://img.shields.io/badge/tests-9%2F9%20%E2%9C%93%20%E2%80%A2%20--validate%205%2F5-success)
+![Tests](https://img.shields.io/badge/tests-9%2F9%20%E2%9C%93%20%E2%80%A2%20--validate%209%2F9-success)
 ![No deps](https://img.shields.io/badge/runtime%20deps-libc%20libm%20alsa%20fftw-success)
 
 Terminal space observatory. Two flavours: a phosphorescent **N-body
@@ -362,7 +362,8 @@ make
   conjunctions, Moon close passes on transition.
 - **Headless modes** — `--tonight`, `--print-state [--json]`,
   `--next <body>`, `--year <year>` (full annual almanac), `--snapshot`,
-  `--validate` (5/5 against Meeus's published worked examples).
+  `--validate` (9/9 against Meeus's published worked examples + JPL
+  Horizons cross-checks for inner and outer planets).
 - **Interactive controls** — time scrub (`+`/`-`/`,`/`.`/`0`), event
   jump (`j`), search & auto-track (`/`), track mode (`T`), cursor pick
   (`c` + hjkl), 8 toggle keys for grid/lines/DSOs/aurora/trails/

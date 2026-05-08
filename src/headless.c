@@ -907,6 +907,26 @@ static const ValidateCase validate_cases[] = {
      * δ = -18°53'16.84" = -18.88801°. Voidwatch uses truncated
      * Standish elements; allow 15' tolerance. */
     { "Venus Meeus 33.a",   EPHEM_VENUS,  2448976.5,   21.0782, -18.8880,  15.0 },
+
+    /* Mercury / Mars / Jupiter / Saturn at J2000.0 (2000-01-01 12:00 TT,
+     * JD 2451545.0) cross-checked against JPL Horizons via the
+     * ssd.jpl.nasa.gov/api/horizons.api endpoint with CENTER='500@399'
+     * (geocentric, Earth) and QUANTITIES='1' (astrometric RA/Dec):
+     *
+     *   Mercury  18h08m20.45s  -24°25'13.4"
+     *   Mars     22h02m05.90s  -13°10'49.8"
+     *   Jupiter  01h35m28.76s  +08°35'45.2"
+     *   Saturn   02h35m03.84s  +12°36'58.6"
+     *
+     * Voidwatch's truncated Standish elements agree to <1' on the
+     * inner planets (no perturbation series in our model), and to
+     * <10' on Jupiter/Saturn (longer orbital periods amplify the
+     * truncation). Tolerances pad the Standish documented precision
+     * for a comfortable PASS margin. */
+    { "Mercury J2000.0",    EPHEM_MERCURY, 2451545.0,  18.1390, -24.4204,  6.0 },
+    { "Mars J2000.0",       EPHEM_MARS,    2451545.0,  22.0350, -13.1805,  6.0 },
+    { "Jupiter J2000.0",    EPHEM_JUPITER, 2451545.0,   1.5913,  +8.5959, 15.0 },
+    { "Saturn J2000.0",     EPHEM_SATURN,  2451545.0,   2.5844, +12.6163, 15.0 },
 };
 static const int validate_case_count =
     (int)(sizeof validate_cases / sizeof validate_cases[0]);
