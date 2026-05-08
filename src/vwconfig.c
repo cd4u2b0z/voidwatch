@@ -13,6 +13,7 @@ void vwconfig_init_defaults(void) {
     g_config.star_mag_cutoff       = 6.5f;
     g_config.comet_mag_cutoff      = 8.0f;
     g_config.asteroid_mag_cutoff   = 9.5f;
+    g_config.kp_index              = 3.0f;     /* normal activity baseline */
     g_config.gravity_g             = GRAVITY_G;
 }
 
@@ -37,6 +38,7 @@ static void apply_kv(const char *key, const char *value) {
     else if (strcmp(key, "astro.star_mag_cutoff")       == 0) g_config.star_mag_cutoff     = (float)v;
     else if (strcmp(key, "astro.comet_mag_cutoff")      == 0) g_config.comet_mag_cutoff    = (float)v;
     else if (strcmp(key, "astro.asteroid_mag_cutoff")   == 0) g_config.asteroid_mag_cutoff = (float)v;
+    else if (strcmp(key, "astro.kp_index")              == 0) g_config.kp_index            = (float)v;
     else if (strcmp(key, "sandbox.gravity_g")           == 0) g_config.gravity_g           = (float)v;
 }
 

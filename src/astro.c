@@ -987,18 +987,39 @@ static void dsos_draw(const AstroState *st, Framebuffer *fb) {
 
 /* === Tier 5c: aurora ================================================ *
  *
- * Sun's-altitude-independent shimmering vertical bands near the
- * poleward horizon. Real auroras need geomagnetic activity (Kp index)
- * + observer at high latitude; voidwatch ignores both — `a` is a
- * toggle, the user is the Kp index. Default off to avoid surprising
- * mid-latitude observers with an unsolicited aurora; press `a` to
- * force-render anywhere on Earth.
+ * Shimmering vertical bands near the poleward horizon. Two knobs gate
+ * visibility:
+ *  - `show_aurora` (key `a`) — on/off toggle, default off so mid-lat
+ *    observers don't get surprised.
+ *  - `g_config.kp_index` (config) — geomagnetic activity 0..9. Aurora
+ *    intensity scales with Kp; observer latitude must clear the auroral
+ *    oval (~67° geomagnetic at quiet times, dropping ~2° per Kp step).
+ *    Set Kp 7+ in config.toml to see aurora at mid-latitudes; Kp 9 is
+ *    "Carrington event" territory and reaches ~30° lat.
  *
  * Colour: oxygen green at low altitudes (~5–10°), violet/red at higher
  * altitudes (~15–25°), with shimmer phase walking azimuth.
  */
 static void aurora_draw(const AstroState *st, Framebuffer *fb) {
     if (!st->show_aurora) return;
+
+    /* Kp gating. The aurora oval sits at roughly (67° - 2.5° × Kp)
+     * geomagnetic latitude; we use geographic lat as a stand-in (off
+     * by ~10° but cell-scale-irrelevant). Below that latitude the
+     * aurora simply isn't visible. */
+    float kp = g_config.kp_index;
+    if (kp < 0.5f) return;
+    double abs_lat_deg = fabs(st->observer.lat_rad) * RAD2DEG;
+    double oval_lat = 67.0 - 2.5 * kp;
+    if (abs_lat_deg < oval_lat - 5.0) return;     /* well below the oval */
+
+    /* Intensity scales with Kp (0.3 at Kp 1, 1.0 at Kp 5, 1.6 at Kp 9)
+     * and falls off as we move equatorward of the oval. */
+    float kp_scale = 0.20f + 0.18f * kp;
+    if (abs_lat_deg < oval_lat) {
+        kp_scale *= (float)(1.0 - (oval_lat - abs_lat_deg) / 10.0);
+        if (kp_scale <= 0.0f) return;
+    }
 
     /* Self-paced from CLOCK_MONOTONIC — render-rate-independent shimmer. */
     static double t = 0.0;
@@ -1037,7 +1058,7 @@ static void aurora_draw(const AstroState *st, Framebuffer *fb) {
             if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
 
             float fall = 1.0f - (float)alt_deg / top_alt_deg;
-            float k = intensity_base * fall * 0.32f;
+            float k = intensity_base * fall * 0.32f * kp_scale;
 
             float tup = (float)alt_deg / top_alt_deg;
             float r = (0.05f + 0.55f * tup) * k;
@@ -1156,18 +1177,26 @@ typedef struct {
     double ra_h;
     double dec_deg;
     int    zhr;
+    float  vel_factor;      /* km/s / 50; speed multiplier vs sporadic */
+    Color  tint;            /* dominant emission colour                 */
 } MeteorShower;
 
+/* Velocity factors below are atmospheric entry speed / 50 km/s, so the
+ * baseline 60-140 sub-px/s shower spawn becomes (factor × baseline).
+ * Tints chosen from observational reports — Leonids are famously blue
+ * from high-velocity ionised N₂; Geminids burn yellow from sodium-rich
+ * chondritic dust; Draconids slow and pale from comet 21P's loose
+ * weak particles. */
 static const MeteorShower meteor_showers[] = {
-    { "Quadrantids",    3, 1.0,  15.33,  49.7, 110 },
-    { "Lyrids",       112, 2.0,  18.07,  34.0,  18 },
-    { "Eta Aquariids",126, 5.0,  22.50,  -1.0,  60 },
-    { "Perseids",     224, 4.0,   3.20,  58.0, 110 },
-    { "Draconids",    281, 0.5,  17.43,  54.0,  10 },
-    { "Orionids",     294, 3.0,   6.33,  16.0,  25 },
-    { "Leonids",      321, 1.0,  10.13,  22.0,  15 },
-    { "Geminids",     348, 2.0,   7.47,  33.0, 150 },
-    { "Ursids",       356, 0.5,  14.47,  76.0,  10 },
+    { "Quadrantids",    3, 1.0,  15.33,  49.7, 110, 0.85f, { 0.80f, 0.90f, 1.00f } }, /* white-blue, 41 km/s */
+    { "Lyrids",       112, 2.0,  18.07,  34.0,  18, 1.00f, { 1.00f, 0.95f, 0.90f } }, /* white,      49 km/s */
+    { "Eta Aquariids",126, 5.0,  22.50,  -1.0,  60, 1.30f, { 1.00f, 0.90f, 0.55f } }, /* yellow,     66 km/s */
+    { "Perseids",     224, 4.0,   3.20,  58.0, 110, 1.20f, { 0.90f, 1.00f, 0.70f } }, /* yel-green,  59 km/s */
+    { "Draconids",    281, 0.5,  17.43,  54.0,  10, 0.55f, { 1.00f, 0.95f, 0.85f } }, /* warm-white, 20 km/s */
+    { "Orionids",     294, 3.0,   6.33,  16.0,  25, 1.30f, { 0.90f, 1.00f, 0.70f } }, /* yel-green,  66 km/s */
+    { "Leonids",      321, 1.0,  10.13,  22.0,  15, 1.40f, { 0.65f, 0.80f, 1.00f } }, /* blue,       71 km/s */
+    { "Geminids",     348, 2.0,   7.47,  33.0, 150, 0.75f, { 1.00f, 0.85f, 0.45f } }, /* yellow,     35 km/s */
+    { "Ursids",       356, 0.5,  14.47,  76.0,  10, 0.75f, { 1.00f, 0.95f, 0.90f } }, /* white,      33 km/s */
 };
 static const int meteor_shower_count =
     (int)(sizeof meteor_showers / sizeof meteor_showers[0]);
@@ -1349,13 +1378,17 @@ static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
         float spread = met_randf() * 12.0f;
         m->sx = rx + cosf(ang) * spread;
         m->sy = ry + sinf(ang) * spread;
-        float speed = 60.0f + met_randf() * 80.0f;
+        /* Per-shower velocity factor: Leonids whip past ~1.4× the
+         * sporadic baseline; Draconids drift at ~0.55×. */
+        float speed = (60.0f + met_randf() * 80.0f) * sh->vel_factor;
         m->vx = cosf(ang) * speed;
         m->vy = sinf(ang) * speed;
-        m->max_life  = 0.4f + met_randf() * 0.4f;
+        /* Faster meteors are also brighter and shorter-lived. */
+        m->max_life  = (0.4f + met_randf() * 0.4f) / sh->vel_factor;
         m->life      = m->max_life;
-        m->intensity = 0.7f + met_randf() * 0.6f;
-        m->color     = (Color){ 1.00f, 0.95f, 0.85f };
+        m->intensity = (0.7f + met_randf() * 0.6f)
+                     * (0.85f + 0.30f * sh->vel_factor);
+        m->color     = sh->tint;
         m->active    = 1;
     }
 }
@@ -1468,8 +1501,10 @@ static void apply_solar_eclipse(Framebuffer *fb,
  * the "begins" line on its first frame — better than silence. */
 void astro_surface_events(const AstroState *st, double t_mono) {
     static const MeteorShower *prev_shower = NULL;
-    static int prev_solar = 0;
-    static int prev_lunar = 0;
+    static int    prev_solar = 0;
+    static int    prev_lunar = 0;
+    static double peak_solar_mag = 0;
+    static double peak_lunar_mag = 0;
 
     /* Meteor shower — fires when the active shower *changes*, including
      * the transition from "no shower" to one (and vice versa). The
@@ -1492,16 +1527,33 @@ void astro_surface_events(const AstroState *st, double t_mono) {
 
     /* Solar eclipse — factor > 0 means the Moon is overlapping the Sun
      * by enough to dim the disc. Threshold of 0.05 to ignore numerical
-     * noise on the boundary. */
-    int now_solar = (solar_eclipse_factor(st) > 0.05);
-    if (now_solar && !prev_solar)        hud_log_event(t_mono, "solar eclipse begins");
-    else if (!now_solar && prev_solar)   hud_log_event(t_mono, "solar eclipse ends");
+     * noise on the boundary. Track peak magnitude across the window so
+     * the end message can report it. */
+    double sf = solar_eclipse_factor(st);
+    int now_solar = (sf > 0.05);
+    if (now_solar && sf > peak_solar_mag) peak_solar_mag = sf;
+    if (now_solar && !prev_solar)
+        hud_log_event(t_mono, "solar eclipse begins");
+    else if (!now_solar && prev_solar) {
+        char buf[28];
+        snprintf(buf, sizeof buf, "solar eclipse — peak %.2f", peak_solar_mag);
+        hud_log_event(t_mono, buf);
+        peak_solar_mag = 0;
+    }
     prev_solar = now_solar;
 
     /* Lunar eclipse — same shape. */
-    int now_lunar = (lunar_eclipse_factor(st) > 0.05);
-    if (now_lunar && !prev_lunar)        hud_log_event(t_mono, "lunar eclipse begins");
-    else if (!now_lunar && prev_lunar)   hud_log_event(t_mono, "lunar eclipse ends");
+    double lf = lunar_eclipse_factor(st);
+    int now_lunar = (lf > 0.05);
+    if (now_lunar && lf > peak_lunar_mag) peak_lunar_mag = lf;
+    if (now_lunar && !prev_lunar)
+        hud_log_event(t_mono, "lunar eclipse begins");
+    else if (!now_lunar && prev_lunar) {
+        char buf[28];
+        snprintf(buf, sizeof buf, "lunar eclipse — peak %.2f", peak_lunar_mag);
+        hud_log_event(t_mono, buf);
+        peak_lunar_mag = 0;
+    }
     prev_lunar = now_lunar;
 
     /* Planet-planet conjunctions — angular separation under ~1° (anything

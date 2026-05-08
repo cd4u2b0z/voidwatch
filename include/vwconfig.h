@@ -30,6 +30,9 @@ typedef struct {
     float star_mag_cutoff;       /* hide stars dimmer than this         */
     float comet_mag_cutoff;      /* hide comets dimmer than this        */
     float asteroid_mag_cutoff;   /* hide asteroids dimmer than this     */
+    float kp_index;              /* geomagnetic activity, 0..9 — scales
+                                  * aurora intensity. 0 = quiet (nothing),
+                                  * 3 = baseline visible, 9 = severe storm */
 
     /* [sandbox] */
     float gravity_g;             /* N-body gravitational constant       */
