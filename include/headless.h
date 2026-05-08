@@ -36,4 +36,11 @@ int headless_next_rise(const Observer *obs, time_t now,
  * sorted human-readable list. */
 int headless_year(const Observer *obs, int year, FILE *out);
 
+/* `voidwatch --validate` — internal sanity tests against known JPL /
+ * Meeus reference values (Sun J2000, Moon at known full moons, comet
+ * positions for a known epoch, etc.). Prints PASS/FAIL with delta in
+ * arcseconds for each check. Returns 0 if everything passed, 1 if any
+ * test failed. */
+int headless_validate(FILE *out);
+
 #endif

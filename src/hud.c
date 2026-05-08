@@ -142,6 +142,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    d        toggle deep-sky objects",
         "    a        toggle aurora",
         "    t        toggle planet trails",
+        "    T        toggle track mode (cursor follows nearest body)",
         "    m        toggle geo / helio view",
         "    s        toggle decorative star backdrop",
         "    c        toggle object cursor (hjkl move)",

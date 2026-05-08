@@ -74,6 +74,15 @@ typedef struct {
     int            cursor_col, cursor_row;
     int            cursor_locked_body;   /* EphemBody index, -1 = none   */
 
+    /* Track mode. When active, the cursor follows the snapshot-tracked
+     * body each frame instead of staying still while the sky rotates.
+     * `track_kind` is a small enum (0=none, 1=planet, 2=comet, 3=asteroid)
+     * — keeping it int so astro.h doesn't need to expose the PickKind
+     * enum from astro.c. `track_idx` indexes the appropriate array. */
+    int            track_active;
+    int            track_kind;
+    int            track_idx;
+
     /* Bundled comets: state recomputed each frame in astro_update. */
     CometState     comets[COMET_COUNT];
 
@@ -89,6 +98,17 @@ void astro_update(AstroState *st, time_t now);
  * only fires on edges, not every frame. `t_mono` is the same monotonic
  * timestamp threaded through hud_draw / hud_log_event. */
 void astro_surface_events(const AstroState *st, double t_mono);
+
+/* Arm track mode: snapshots whichever body is currently nearest the
+ * cursor (planet / comet / asteroid) into the track_* fields. If
+ * nothing's near enough, no-op. Called when the user presses `T`. */
+void astro_track_arm(AstroState *st, int cols, int rows);
+
+/* Per-frame track update: if track_active, look up the tracked body's
+ * current screen-cell position and slide the cursor there. Untracks if
+ * the body drops below the horizon. Called from main.c right after
+ * astro_update so the cursor sticks for the rest of the frame. */
+void astro_track_tick(AstroState *st, int cols, int rows);
 
 /* Find the next "interesting" astronomical event after `from_jd`.
  * Walks forward in 1-day steps up to `max_days`, returning the JD of

@@ -72,6 +72,10 @@ static void print_help(const char *argv0) {
         "  --print-state --json   same as JSON\n"
         "  --next <body>          next rise time for a planet/comet/asteroid\n"
         "  --year <year>          annual almanac for the given Gregorian year\n"
+        "  --at <YYYY-MM-DD[Thh:mm:ss]>\n"
+        "                         seed virtual clock at the given moment;\n"
+        "                         applies to --astro and the headless modes\n"
+        "  --validate             run internal sanity tests against JPL refs\n"
         "\n"
         "  -h, --help             show this help and exit\n"
         "\n"
@@ -97,8 +101,10 @@ int main(int argc, char **argv) {
     int         astro_mode  = 0;
     double      cli_lat     = NAN;
     double      cli_lon     = NAN;
-    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR } headless = HL_NONE;
+    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR, HL_VALIDATE } headless = HL_NONE;
     int         json_output = 0;
+    time_t      at_time     = 0;
+    int         at_set      = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -164,6 +170,41 @@ int main(int argc, char **argv) {
             }
             headless = HL_NEXT;
             next_body = argv[++i];
+        } else if (strcmp(a, "--validate") == 0) {
+            headless = HL_VALIDATE;
+        } else if (strcmp(a, "--at") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "voidwatch: --at requires an ISO date.\n");
+                return 2;
+            }
+            const char *s = argv[++i];
+            int y = 0, mo = 0, d = 0, h = 12, mi = 0, sec = 0;
+            int n = sscanf(s, "%d-%d-%dT%d:%d:%d",
+                           &y, &mo, &d, &h, &mi, &sec);
+            if (n != 6) {
+                /* Try date-only: defaults to noon local. */
+                if (sscanf(s, "%d-%d-%d", &y, &mo, &d) != 3) {
+                    fprintf(stderr,
+                        "voidwatch: --at: not an ISO date "
+                        "(YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS): %s\n", s);
+                    return 2;
+                }
+                h = 12; mi = 0; sec = 0;
+            }
+            struct tm tm = {0};
+            tm.tm_year = y - 1900;
+            tm.tm_mon  = mo - 1;
+            tm.tm_mday = d;
+            tm.tm_hour = h;
+            tm.tm_min  = mi;
+            tm.tm_sec  = sec;
+            tm.tm_isdst = -1;
+            at_time = mktime(&tm);
+            if (at_time == (time_t)-1) {
+                fprintf(stderr, "voidwatch: --at: invalid date: %s\n", s);
+                return 2;
+            }
+            at_set = 1;
         } else if (strcmp(a, "--year") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "voidwatch: --year requires a year.\n");
@@ -200,18 +241,23 @@ int main(int argc, char **argv) {
      * no audio, no render loop. Location resolution is the only state we
      * need from the regular pipeline. */
     if (headless != HL_NONE) {
+        /* --validate doesn't need an observer — it tests geocentric
+         * positions against fixed references. Short-circuit here. */
+        if (headless == HL_VALIDATE) return headless_validate(stdout);
+
         Observer obs = {0};
         int fb_loc = 0;
         if (location_resolve(cli_lat, cli_lon, &obs, &fb_loc) != 0) {
             fprintf(stderr, "voidwatch: invalid latitude/longitude.\n");
             return 2;
         }
-        time_t now = time(NULL);
+        time_t now = at_set ? at_time : time(NULL);
         switch (headless) {
             case HL_TONIGHT:     return headless_tonight(&obs, now, stdout);
             case HL_PRINT_STATE: return headless_print_state(&obs, now, stdout, json_output);
             case HL_NEXT:        return headless_next_rise(&obs, now, next_body, stdout);
             case HL_YEAR:        return headless_year(&obs, year_arg, stdout);
+            case HL_VALIDATE:
             case HL_NONE: break;
         }
     }
@@ -261,9 +307,11 @@ int main(int argc, char **argv) {
 
     /* Astro-mode virtual clock. `astro_speed` scales time progression;
      * `astro_offset` is a free additive scrub in seconds. The virtual
-     * `now` we feed astro_update is real time + offset + integrated speed. */
+     * `now` we feed astro_update is real time + offset + integrated speed.
+     * If --at was passed, seed the offset so the virtual clock starts
+     * at the requested moment. */
     double astro_speed  = 1.0;
-    double astro_offset = 0.0;
+    double astro_offset = at_set ? (double)(at_time - time(NULL)) : 0.0;
 
     struct timespec last;
     clock_gettime(CLOCK_MONOTONIC, &last);
@@ -311,6 +359,21 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && (k == 'a' || k == 'A')) {
                 astro.show_aurora = !astro.show_aurora;
+            }
+            /* Capital T toggles track mode (lowercase t is trails). */
+            else if (astro_mode && k == 'T') {
+                if (astro.track_active) {
+                    astro.track_active = 0;
+                    hud_log_event(t_total, "track off");
+                } else {
+                    astro_track_arm(&astro, cols, rows);
+                    if (astro.track_active) {
+                        char buf[32];
+                        snprintf(buf, sizeof buf, "tracking %d:%d",
+                                 astro.track_kind, astro.track_idx);
+                        hud_log_event(t_total, buf);
+                    }
+                }
             }
             else if (astro_mode && (k == 'c' || k == 'C')) {
                 astro.cursor_active = !astro.cursor_active;
@@ -411,6 +474,7 @@ int main(int argc, char **argv) {
             astro_offset += dt * (astro_speed - 1.0);
             time_t virt_now = time(NULL) + (time_t)astro_offset;
             astro_update(&astro, virt_now);
+            astro_track_tick(&astro, cols, rows);
             astro_surface_events(&astro, t_total);
         }
 

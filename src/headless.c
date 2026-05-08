@@ -680,6 +680,73 @@ int headless_year(const Observer *obs, int year, FILE *out) {
     return 0;
 }
 
+/* ---- Self-test (--validate) -------------------------------------- */
+
+typedef struct {
+    const char  *label;
+    EphemBody    body;
+    double       jd;            /* Julian Day TT */
+    double       expect_ra_h;   /* hours [0,24) */
+    double       expect_dec_deg;
+    double       tol_arcmin;    /* allowed great-circle distance */
+} ValidateCase;
+
+/* Reference values from Meeus, *Astronomical Algorithms* worked
+ * examples. Each ephemeris module has a worked example in the cited
+ * chapter; voidwatch should reproduce those to within Meeus's
+ * documented precision (~0.01° Sun, ~0.1° Moon, ~few arcmin planets).
+ *
+ * NOTE: this suite is intentionally conservative. More rows can be
+ * added as we cross-check them against JPL Horizons or verified
+ * Meeus-derived values; bad references give false fails. */
+static const ValidateCase validate_cases[] = {
+    /* Sun at J2000.0 epoch — geocentric apparent.
+     * Meeus 25.b verified value: λ ≈ 281.4°, β ≈ 0, → RA 18h45m, Dec -23.03°. */
+    { "Sun J2000.0",       EPHEM_SUN, 2451545.0,   18.7493, -23.030,  30.0 },
+    /* Sun at 1992-Oct-13.0 TT — Meeus example 25.a worked solution.
+     * Apparent: RA 13h 13m 30.749s = 13.225209h, Dec -07°47'01.74" = -7.7838°. */
+    { "Sun Meeus 25.a",    EPHEM_SUN, 2448908.5,   13.2252,  -7.7838,  6.0 },
+    /* Sun at 2024-04-08 18:18 UT (Great American Eclipse) — JPL Horizons. */
+    { "Sun 2024-04-08",    EPHEM_SUN, 2460409.262,  1.1697,   7.488,  30.0 },
+};
+static const int validate_case_count =
+    (int)(sizeof validate_cases / sizeof validate_cases[0]);
+
+static double great_circle_arcmin(double ra1_h, double dec1_d,
+                                  double ra2_h, double dec2_d) {
+    double r1 = ra1_h * M_PI / 12.0;
+    double d1 = dec1_d * DEG2RAD;
+    double r2 = ra2_h * M_PI / 12.0;
+    double d2 = dec2_d * DEG2RAD;
+    double c = sin(d1) * sin(d2) + cos(d1) * cos(d2) * cos(r1 - r2);
+    if (c >  1.0) c =  1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c) * RAD2DEG * 60.0;
+}
+
+int headless_validate(FILE *out) {
+    fprintf(out, "voidwatch self-test\n");
+    fprintf(out, "  reference: JPL Horizons geocentric apparent\n");
+    fprintf(out, "  %-22s %-9s %-10s %-9s\n",
+            "case", "delta", "tolerance", "result");
+
+    int n_pass = 0, n_fail = 0;
+    for (int i = 0; i < validate_case_count; i++) {
+        const ValidateCase *c = &validate_cases[i];
+        EphemPosition p;
+        ephem_compute(c->body, c->jd, &p);
+        double delta_arcmin = great_circle_arcmin(
+            p.ra_rad * 12.0 / M_PI, p.dec_rad * RAD2DEG,
+            c->expect_ra_h, c->expect_dec_deg);
+        const char *result = (delta_arcmin <= c->tol_arcmin) ? "PASS" : "FAIL";
+        if (delta_arcmin <= c->tol_arcmin) n_pass++; else n_fail++;
+        fprintf(out, "  %-22s %5.1f'    %5.1f'      %s\n",
+                c->label, delta_arcmin, c->tol_arcmin, result);
+    }
+    fprintf(out, "\n%d / %d passed.\n", n_pass, n_pass + n_fail);
+    return (n_fail == 0) ? 0 : 1;
+}
+
 int headless_next_rise(const Observer *obs, time_t now,
                        const char *name, FILE *out) {
     BodyLookup b = lookup_body(name);

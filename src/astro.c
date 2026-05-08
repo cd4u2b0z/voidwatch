@@ -2034,6 +2034,67 @@ static CursorPick find_nearest_target(const AstroState *st, int cols, int rows,
     return best;
 }
 
+/* Track mode helpers — placed here so they can call find_nearest_target
+ * + the PickKind enum without a forward declaration dance. */
+static int track_cell_for(const AstroState *st, int cols, int rows,
+                          int kind, int idx, int *out_col, int *out_row) {
+    int sub_w = cols * 2, sub_h = rows * 4;
+    double alt = -1.0, az = 0.0;
+    if (kind == PICK_PLANET   && idx >= 0 && idx < EPHEM_COUNT) {
+        alt = st->pos[idx].alt_rad;
+        az  = st->pos[idx].az_rad;
+    } else if (kind == PICK_COMET    && idx >= 0 && idx < COMET_COUNT) {
+        alt = st->comets[idx].alt_rad;
+        az  = st->comets[idx].az_rad;
+    } else if (kind == PICK_ASTEROID && idx >= 0 && idx < ASTEROID_COUNT) {
+        alt = st->asteroids[idx].alt_rad;
+        az  = st->asteroids[idx].az_rad;
+    } else {
+        return -1;
+    }
+    if (alt < 0.0) return -1;
+    float sx, sy;
+    if (project(sub_w, sub_h, alt, az, &sx, &sy) != 0) return -1;
+    int c = (int)(sx / 2.0f);
+    int r = (int)(sy / 4.0f);
+    if (c < 1) c = 1;
+    if (r < 1) r = 1;
+    if (c > cols) c = cols;
+    if (r > rows) r = rows;
+    *out_col = c;
+    *out_row = r;
+    return 0;
+}
+
+void astro_track_arm(AstroState *st, int cols, int rows) {
+    int col = st->cursor_col;
+    int row = st->cursor_row;
+    if (col == 0 && row == 0) {
+        col = cols / 2;
+        row = rows / 2;
+    }
+    CursorPick p = find_nearest_target(st, cols, rows, col, row);
+    if (p.kind == PICK_NONE) {
+        st->track_active = 0;
+        return;
+    }
+    st->track_active = 1;
+    st->track_kind   = (int)p.kind;
+    st->track_idx    = p.idx;
+}
+
+void astro_track_tick(AstroState *st, int cols, int rows) {
+    if (!st->track_active) return;
+    int c, r;
+    if (track_cell_for(st, cols, rows,
+                       st->track_kind, st->track_idx, &c, &r) != 0) {
+        st->track_active = 0;       /* body dropped below horizon */
+        return;
+    }
+    st->cursor_col = c;
+    st->cursor_row = r;
+}
+
 void astro_labels(const AstroState *st, FILE *out, int cols, int rows) {
     int chr = p_byte(g_palette.hud.r * 0.7f);
     int chg = p_byte(g_palette.hud.g * 0.7f);
