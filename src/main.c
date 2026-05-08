@@ -416,12 +416,15 @@ int main(int argc, char **argv) {
         float rcam_x = cam_x + shake_x;
         float rcam_y = cam_y + shake_y;
 
-        /* Astro mode renders a fresh sky every frame — no decay trail.
-         * Body motion at high time-scrub would otherwise leave additive
-         * smears of every planet's recent stamps. Intentional planet
-         * trails come from the RA/Dec ring buffer (`t` toggle), not
-         * from framebuffer persistence. */
-        if (astro_mode)                      fb_clear(&fb);
+        /* Astro mode uses a fast decay (0.5) rather than full clear:
+         * - Body stamps fade in ~4 frames, so even at 1000x time-scrub
+         *   the per-frame motion (sub-pixel) doesn't leave visible smear.
+         * - The decorative starfield's twinkle has a decay halo that
+         *   gives the sky a "pulsing/glowing" feel instead of an
+         *   instant per-frame flick.
+         * Sandbox keeps the configurable g_config.fb_decay (defaults to
+         * 0.92 — long phosphorescent trails for N-body aesthetic). */
+        if (astro_mode)                      fb_decay(&fb, 0.5f);
         else if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
         else                                 fb_clear(&fb);
 

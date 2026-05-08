@@ -1554,6 +1554,57 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
         AstroStyle s = style_for((EphemBody)b);
         stamp_body(fb, sx, sy, &s);
     }
+
+    /* Comets — current heliocentric positions. Most have aphelions far
+     * outside Neptune's orbit (Halley ~35 AU, Hale-Bopp ~370 AU); we
+     * project them at their actual position and let the screen-radius
+     * clip handle the rest. Tail points away from the Sun (which is at
+     * screen centre), length scales with 1/r_helio so close-in comets
+     * grow visible plumes. */
+    Color comet_tint = { 0.85f, 0.95f, 1.00f };
+    for (int i = 0; i < COMET_COUNT; i++) {
+        double cx_au, cy_au, cz_au;
+        comet_helio_xyz_for(i, st->jd, &cx_au, &cy_au, &cz_au);
+        float sx, sy;
+        helio_map_au(cx, cy, r_scale, cx_au, cy_au, &sx, &sy);
+        if (sx < 0 || sy < 0 || sx >= fb->sub_w || sy >= fb->sub_h) continue;
+
+        /* Head dot. */
+        AstroStyle head = { comet_tint, 1.4f, 0.9f, 0.30f };
+        stamp_body(fb, sx, sy, &head);
+
+        /* Tail: outward from Sun. Length grows as r → q (perihelion). */
+        float dx = sx - cx, dy = sy - cy;
+        float dlen = sqrtf(dx*dx + dy*dy);
+        if (dlen < 1e-3f) continue;
+        float ux = dx / dlen, uy = dy / dlen;
+        double r = sqrt(cx_au*cx_au + cy_au*cy_au + cz_au*cz_au);
+        if (r < 0.3) r = 0.3;
+        float tail_px = (float)(15.0 / r);
+        if (tail_px > 50.0f) tail_px = 50.0f;
+        int n = (int)tail_px;
+        for (int s = 1; s < n; s++) {
+            float k = (1.0f - (float)s / n) * 0.5f;
+            if (k < 0.02f) break;
+            int ix = (int)(sx + ux * s + 0.5f);
+            int iy = (int)(sy + uy * s + 0.5f);
+            if (ix < 0 || iy < 0 || ix >= fb->sub_w || iy >= fb->sub_h) continue;
+            fb_add(fb, ix, iy,
+                   comet_tint.r * k, comet_tint.g * k, comet_tint.b * k);
+        }
+    }
+
+    /* Asteroids — neutral rocky dots, no tail. */
+    Color ast_tint = { 0.85f, 0.82f, 0.75f };
+    for (int i = 0; i < ASTEROID_COUNT; i++) {
+        double ax, ay, az;
+        asteroid_helio_xyz_for(i, st->jd, &ax, &ay, &az);
+        float sx, sy;
+        helio_map_au(cx, cy, r_scale, ax, ay, &sx, &sy);
+        if (sx < 0 || sy < 0 || sx >= fb->sub_w || sy >= fb->sub_h) continue;
+        AstroStyle s = { ast_tint, 0.85f, 0.7f, 0.20f };
+        stamp_body(fb, sx, sy, &s);
+    }
 }
 
 /* Cell-coord screen position for a body in heliocentric mode. Used by

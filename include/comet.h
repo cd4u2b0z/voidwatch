@@ -52,4 +52,10 @@ extern const int            comet_count;
  * comet at `jd`. Output array must be at least `comet_count` long. */
 void comet_compute_all(double jd, CometState *out);
 
+/* Heliocentric ecliptic position of the indexed comet at `jd`. Used by
+ * the heliocentric view and any future orbit-tracing. Returns silently
+ * for out-of-range indices with (0,0,0) — caller must validate. */
+void comet_helio_xyz_for(int idx, double jd,
+                         double *x, double *y, double *z);
+
 #endif

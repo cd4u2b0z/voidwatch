@@ -139,6 +139,16 @@ static void comet_helio_xyz(const CometElements *c, double jd,
     if (r_helio) *r_helio = sqrt(*x * *x + *y * *y + *z * *z);
 }
 
+void comet_helio_xyz_for(int idx, double jd,
+                         double *x, double *y, double *z) {
+    if (idx < 0 || idx >= comet_count) {
+        if (x) *x = 0; if (y) *y = 0; if (z) *z = 0;
+        return;
+    }
+    double r;
+    comet_helio_xyz(&comet_elements[idx], jd, x, y, z, &r);
+}
+
 void comet_compute_all(double jd, CometState *out) {
     double ex, ey, ez;
     ephem_earth_helio_xyz(jd, &ex, &ey, &ez);

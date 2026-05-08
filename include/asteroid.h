@@ -42,4 +42,8 @@ extern const int               asteroid_count;
 
 void asteroid_compute_all(double jd, AsteroidState *out);
 
+/* Heliocentric ecliptic position for the indexed asteroid at `jd`. */
+void asteroid_helio_xyz_for(int idx, double jd,
+                            double *x, double *y, double *z);
+
 #endif
