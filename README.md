@@ -16,7 +16,7 @@ Terminal space observatory. Two flavours: a phosphorescent **N-body
 sandbox** (orbital sim with chromatic body cores, Perlin nebulae, audio-
 reactive supernovae) and a real-ephemeris **planetarium** (8 planets,
 8870 stars, 88 IAU constellations, meteor showers, eclipses, comets,
-asteroids, **near-Earth satellites via hand-built SGP4** , all from
+asteroids, **near-Earth satellites via hand-built SGP4** — all from
 real catalogues, all baked into the binary).
 
 > *"Passive sensor feed" aesthetic — ambient, slow, never demands attention.*
