@@ -1179,11 +1179,13 @@ typedef struct {
     float vx, vy;
     float life, max_life;
     float intensity;
+    Color color;
     int   active;
 } Meteor;
 
 static Meteor   met_pool[METEOR_POOL];
 static double   met_spawn_accum = 0.0;
+static double   sporadic_spawn_accum = 0.0;
 static unsigned met_rng = 0xC0FFEEu;
 
 static unsigned met_rand32(void) {
@@ -1243,6 +1245,17 @@ static void meteors_step(const AstroState *st, Framebuffer *fb) {
     meteors_step_internal(st, fb, dt);
 }
 
+/* Pick a sporadic-meteor colour by weighted random.
+ * 70% warm-white (typical), 15% blue (high-velocity ionised N2),
+ * 10% green (sodium/copper compounds), 5% red (slow). */
+static Color sporadic_color(void) {
+    float r = met_randf();
+    if (r < 0.70f) return (Color){ 1.00f, 0.95f, 0.85f }; /* warm-white */
+    if (r < 0.85f) return (Color){ 0.70f, 0.85f, 1.00f }; /* blue */
+    if (r < 0.95f) return (Color){ 0.60f, 1.00f, 0.70f }; /* green */
+    return (Color){ 1.00f, 0.50f, 0.40f };                /* red */
+}
+
 static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
                                   double dt) {
     /* Tick existing meteors. */
@@ -1254,6 +1267,59 @@ static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
         if (met_pool[i].life <= 0.0f) met_pool[i].active = 0;
     }
 
+    /* === Sporadic background ===========================================
+     *
+     * Real sky has ~7-10 meteors/hr from random radiants — Earth sweeping
+     * up the dust complex. The rate roughly doubles between 18:00 and
+     * 06:00 local solar time as the apex of Earth's motion rotates into
+     * view. Below the horizon we don't render any.
+     *
+     * Apex factor: 0.5 at 6pm (looking trailing), 2.0 at 6am (looking
+     * leading). cosine-shaped over 24h centred on hour-angle = -6h.
+     */
+    if (st->pos[EPHEM_SUN].alt_rad < 0.0) {
+        double sun_ra_h = st->pos[EPHEM_SUN].ra_rad * 12.0 / M_PI;
+        double ha_h = st->lst_hours - sun_ra_h;
+        while (ha_h >  12.0) ha_h -= 24.0;
+        while (ha_h < -12.0) ha_h += 24.0;
+        double apex = 1.25 + 0.75 * cos((ha_h + 6.0) * M_PI / 12.0);
+
+        const double SPORADIC_PER_HR = 8.0;
+        double rate_per_sec = (SPORADIC_PER_HR * apex) / 3600.0;
+        sporadic_spawn_accum += rate_per_sec * dt;
+
+        float cx = (float)fb->sub_w * 0.5f;
+        float cy = (float)fb->sub_h * 0.5f;
+        float r_max = fminf(cx, cy * 0.5f) * 0.85f;
+
+        while (sporadic_spawn_accum >= 1.0) {
+            sporadic_spawn_accum -= 1.0;
+            int slot = -1;
+            for (int i = 0; i < METEOR_POOL; i++) {
+                if (!met_pool[i].active) { slot = i; break; }
+            }
+            if (slot < 0) break;
+            Meteor *m = &met_pool[slot];
+            /* Uniform random position within the projection disc. sqrt
+             * for area-uniform sampling; y stretched 2× for terminal
+             * cell aspect (matches project()). */
+            float rr = sqrtf(met_randf()) * r_max;
+            float th = met_randf() * 2.0f * (float)M_PI;
+            m->sx = cx + rr * cosf(th);
+            m->sy = cy + rr * sinf(th) * 2.0f;
+            float ang = met_randf() * 2.0f * (float)M_PI;
+            float speed = 40.0f + met_randf() * 60.0f;     /* slower than showers */
+            m->vx = cosf(ang) * speed;
+            m->vy = sinf(ang) * speed;
+            m->max_life  = 0.35f + met_randf() * 0.5f;
+            m->life      = m->max_life;
+            m->intensity = 0.5f + met_randf() * 0.7f;
+            m->color     = sporadic_color();
+            m->active    = 1;
+        }
+    }
+
+    /* === Active shower ================================================ */
     float rate_per_min = 0.0f;
     const MeteorShower *sh = meteor_active_shower(st->jd, &rate_per_min);
     if (!sh || rate_per_min < 0.05f) return;
@@ -1289,6 +1355,7 @@ static void meteors_step_internal(const AstroState *st, Framebuffer *fb,
         m->max_life  = 0.4f + met_randf() * 0.4f;
         m->life      = m->max_life;
         m->intensity = 0.7f + met_randf() * 0.6f;
+        m->color     = (Color){ 1.00f, 0.95f, 0.85f };
         m->active    = 1;
     }
 }
@@ -1310,7 +1377,8 @@ static void meteors_draw(Framebuffer *fb) {
             int x = (int)(m->sx + ux * s + 0.5f);
             int y = (int)(m->sy + uy * s + 0.5f);
             if (x < 0 || y < 0 || x >= fb->sub_w || y >= fb->sub_h) continue;
-            fb_add(fb, x, y, k, k * 0.95f, k * 0.85f);
+            fb_add(fb, x, y,
+                   m->color.r * k, m->color.g * k, m->color.b * k);
         }
     }
 }
