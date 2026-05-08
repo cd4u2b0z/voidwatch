@@ -1,9 +1,9 @@
 # voidwatch
 
-![Version](https://img.shields.io/badge/version-1.0.0-orange)
+![Version](https://img.shields.io/badge/version-1.1.0-orange)
 ![C11](https://img.shields.io/badge/C-11-00599C?style=flat&logo=c&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
-![License](https://img.shields.io/badge/license-MIT-brightgreen)
+![License](https://img.shields.io/badge/license-MIT%20source%20%E2%80%A2%20GPL--2.0%20binary-brightgreen)
 ![Lines](https://img.shields.io/badge/lines-10k%20src%20%2B%201.7k%20tests%20%2B%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)

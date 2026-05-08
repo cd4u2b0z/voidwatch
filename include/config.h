@@ -1,7 +1,7 @@
 #ifndef VOIDWATCH_CONFIG_H
 #define VOIDWATCH_CONFIG_H
 
-#define VOIDWATCH_VERSION "1.0.0"
+#define VOIDWATCH_VERSION "1.1.0"
 
 typedef struct { float r, g, b; } Color;
 
