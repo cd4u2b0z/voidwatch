@@ -4,7 +4,7 @@
 ![C11](https://img.shields.io/badge/C-11-00599C?style=flat&logo=c&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Lines](https://img.shields.io/badge/lines-7k%20+%208870%20stars-lightgrey)
+![Lines](https://img.shields.io/badge/lines-10k%20src%20%2B%201.7k%20tests%20%2B%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
 ![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium%20%2B%2030%20DSOs-cyan)
