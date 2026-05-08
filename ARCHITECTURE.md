@@ -148,14 +148,14 @@ These weren't all there on day one. Some emerged from pain (see
 |        |               | + ANSI truecolor + gamma 1.18   |           |
 |        |               +---------------------------------+           |
 |        |                                                             |
-|  +-----+---------------+    +---------------------------+            |
-|  |  Audio worker       |    |  Compile-time catalogues  |            |
-|  |  (ALSA + FFTW3)     |    |  HYG (~8870 stars),       |            |
+|  +-----+---------------+    +----------------------------+           |
+|  |  Audio worker       |    |  Compile-time catalogues   |           |
+|  |  (ALSA + FFTW3)     |    |  HYG (~8870 stars),        |           |
 |  |  thread, snapshot   |    |  Stellarium constellations,|           |
-|  |  via mutex          |    |  Messier/NGC DSOs,        |            |
-|  +---------------------+    |  meteor showers, comets,  |            |
-|                              |  asteroids                |            |
-|                              +---------------------------+            |
+|  |  via mutex          |    |  Messier/NGC DSOs,         |           |
+|  +---------------------+    |  meteor showers, comets,   |           |
+|                             |  asteroids                 |           |
+|                              +---------------------------+           |
 +---------------------------------------------------------------------+
 ```
 
