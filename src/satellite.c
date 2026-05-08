@@ -51,6 +51,25 @@
 #endif
 
 #define DEG2RAD (M_PI / 180.0)
+#define TWOPI   (2.0 * M_PI)
+
+/* ---- WGS-72 SGP4 constants (Vallado AIAA-2006-6753, getgravconst) ----
+ *
+ * SGP4 is fitted against TLEs that themselves were generated against
+ * WGS-72. WGS-84 is physically newer but does NOT match published
+ * verification vectors unless many associated choices change. Stay on
+ * WGS-72 — voidwatch is a propagator, not a geodesy tool.
+ */
+#define WGS72_MU         398600.8                         /* km^3 / s^2  */
+#define WGS72_RAD_KM     6378.135                          /* Earth ER, km */
+/* xke = 60 / sqrt(R^3 / mu)  (= 1 / minutes-per-time-unit). Computed
+ * literally rather than at runtime so the constant is grep-able. */
+#define WGS72_XKE        0.0743669161331734132             /* 1/tu        */
+#define WGS72_J2         0.001082616
+#define WGS72_J3        -2.53881e-6
+#define WGS72_J4        -1.65597e-6
+#define WGS72_J3OJ2     (WGS72_J3 / WGS72_J2)
+#define WGS72_AE         1.0           /* unit Earth radius (canonical) */
 
 /* TLE_LINE_LEN excludes the trailing newline if present. */
 #define TLE_LINE_LEN 69
@@ -207,6 +226,26 @@ static int tle_year_pivot(int yy) {
     return (yy < 57) ? (2000 + yy) : (1900 + yy);
 }
 
+/* ---- Greenwich sidereal time (SGP4 form) ----------------------------
+ *
+ * Vallado 2013 eq 3-45 / "gstime" in NASA SGP4.c. Returns GMST in
+ * radians at the given Julian Day UT1. Slightly different polynomial
+ * form than Meeus 12.4 — keep this one because TLE epochs and Vallado
+ * verification vectors are computed against this exact expression.
+ */
+static double sgp4_gstime(double jd_ut1) {
+    double tut1 = (jd_ut1 - 2451545.0) / 36525.0;
+    double sec  = -6.2e-6 * tut1 * tut1 * tut1
+                +  0.093104 * tut1 * tut1
+                + (876600.0 * 3600.0 + 8640184.812866) * tut1
+                +  67310.54841;
+    /* 240 = 86400 / 360, converts seconds-of-time to degrees. Then
+     * deg → rad and reduce to [0, 2π). */
+    double rad = fmod(sec * DEG2RAD / 240.0, TWOPI);
+    if (rad < 0.0) rad += TWOPI;
+    return rad;
+}
+
 /* ---- Public API ------------------------------------------------------ */
 
 const char *satellite_status_string(SatelliteStatus s) {
@@ -339,5 +378,204 @@ SatelliteStatus satellite_tle_parse(const char *name,
         snprintf(out->name, sizeof out->name, "NORAD %d", catalog_1);
     }
 
+    return SAT_OK;
+}
+
+/* ---- Phase 2: SGP4 model initialization ------------------------------
+ *
+ * Map Vallado/NASA SGP4.c initl + sgp4init (near-Earth path only) onto
+ * SatelliteModel. Variable names follow the reference where possible —
+ * see SATELLITES.md "ugly but traceable beats pretty abstraction."
+ *
+ * Step order (Vallado):
+ *   1. validate inputs (ecc in [0,1), n > 0, perigee >= 1 ER)
+ *   2. copy TLE elements into SGP4 units
+ *   3. recover original (un-Kozai) mean motion
+ *   4. derive auxiliary quantities (ao, rp, gsto, ...)
+ *   5. select atmospheric s/qoms2t based on perigee
+ *   6. compute near-Earth secular + periodic coefficients
+ *   7. classify deep-space (period >= 225 min) — Phase 4 fills the body
+ *   8. compute t-power drag coefficients (only when not simplified)
+ *
+ * Phase 3 will implement satellite_propagate_teme; this routine returns
+ * a model that's ready for it (or marked deep_space=1 to refuse).
+ */
+SatelliteStatus satellite_model_init(const SatelliteTLE *tle,
+                                     SatelliteModel *sat) {
+    if (!tle || !sat) return SAT_BAD_FIELD;
+
+    /* Brief-mandated input rejection: ecc < 0 or >= 1, mean motion <= 0. */
+    if (tle->eccentricity < 0.0 || tle->eccentricity >= 1.0)
+        return SAT_BAD_FIELD;
+    if (tle->mean_motion_rad_min <= 0.0)
+        return SAT_BAD_FIELD;
+
+    memset(sat, 0, sizeof *sat);
+
+    /* ---- Step 2: TLE elements into SGP4 units (already in radians /
+     * rad-per-minute coming out of the parser). */
+    sat->ecco       = tle->eccentricity;
+    sat->argpo      = tle->arg_perigee_rad;
+    sat->inclo      = tle->inclination_rad;
+    sat->mo         = tle->mean_anomaly_rad;
+    sat->no_kozai   = tle->mean_motion_rad_min;
+    sat->nodeo      = tle->raan_rad;
+    sat->bstar      = tle->bstar;
+    sat->jdsatepoch = tle->epoch_jd;
+
+    const double x2o3 = 2.0 / 3.0;
+
+    /* ---- Step 3 (initl): un-Kozai recovery + aux epoch quantities ---- */
+    sat->eccsq  = sat->ecco * sat->ecco;
+    sat->omeosq = 1.0 - sat->eccsq;
+    sat->rteosq = sqrt(sat->omeosq);
+    sat->cosio  = cos(sat->inclo);
+    sat->cosio2 = sat->cosio * sat->cosio;
+    sat->sinio  = sin(sat->inclo);
+
+    /* ak: Kozai semi-major axis. del corrects to Brouwer mean motion. */
+    double ak  = pow(WGS72_XKE / sat->no_kozai, x2o3);
+    double d1  = 0.75 * WGS72_J2 * (3.0 * sat->cosio2 - 1.0)
+               / (sat->rteosq * sat->omeosq);
+    double del = d1 / (ak * ak);
+    double adel = ak * (1.0 - del * del
+                            - del * (1.0 / 3.0 + 134.0 * del * del / 81.0));
+    del = d1 / (adel * adel);
+    sat->no_unkozai = sat->no_kozai / (1.0 + del);
+
+    /* ---- Step 4: derived auxiliaries ---- */
+    sat->ao    = pow(WGS72_XKE / sat->no_unkozai, x2o3);
+    double po  = sat->ao * sat->omeosq;
+    sat->con42 = 1.0 - 5.0 * sat->cosio2;
+    sat->con41 = -sat->con42 - sat->cosio2 - sat->cosio2;
+    sat->ainv  = 1.0 / sat->ao;
+    sat->posq  = po * po;
+    sat->rp    = sat->ao * (1.0 - sat->ecco);
+    sat->gsto  = sgp4_gstime(sat->jdsatepoch);
+
+    /* Brief-mandated: perigee below Earth surface = decayed orbit. NASA
+     * SGP4.c comments this out (relies on the per-step mrt < 1 check),
+     * but voidwatch's policy per SATELLITES.md is to refuse at init. */
+    if (sat->rp < 1.0) return SAT_PROP_ERROR;
+
+    /* ---- Step 5: atmospheric drag constants tuned by perigee altitude */
+    double sfour  = 78.0 / WGS72_RAD_KM + 1.0;
+    double q0     = (120.0 - 78.0) / WGS72_RAD_KM;
+    double qzms24 = q0 * q0 * q0 * q0;
+    double perige = (sat->rp - 1.0) * WGS72_RAD_KM;        /* km altitude */
+
+    if (perige < 156.0) {
+        sfour = perige - 78.0;
+        if (perige < 98.0) sfour = 20.0;
+        double q = (120.0 - sfour) / WGS72_RAD_KM;
+        qzms24 = q * q * q * q;
+        sfour = sfour / WGS72_RAD_KM + 1.0;
+    }
+
+    sat->isimp = (sat->rp < (220.0 / WGS72_RAD_KM + 1.0)) ? 1 : 0;
+
+    /* ---- Step 6: secular and periodic near-Earth coefficients ------ */
+    double pinvsq = 1.0 / sat->posq;
+    double tsi    = 1.0 / (sat->ao - sfour);
+    sat->eta      = sat->ao * sat->ecco * tsi;
+    double etasq  = sat->eta * sat->eta;
+    double eeta   = sat->ecco * sat->eta;
+    double psisq  = fabs(1.0 - etasq);
+    double coef   = qzms24 * pow(tsi, 4.0);
+    double coef1  = coef / pow(psisq, 3.5);
+
+    double cc2 = coef1 * sat->no_unkozai *
+                 (sat->ao * (1.0 + 1.5 * etasq + eeta * (4.0 + etasq))
+                  + 0.375 * WGS72_J2 * tsi / psisq * sat->con41 *
+                    (8.0 + 3.0 * etasq * (8.0 + etasq)));
+    sat->cc1 = sat->bstar * cc2;
+
+    double cc3 = 0.0;
+    if (sat->ecco > 1.0e-4) {
+        cc3 = -2.0 * coef * tsi * WGS72_J3OJ2 * sat->no_unkozai
+            * sat->sinio / sat->ecco;
+    }
+
+    sat->x1mth2 = 1.0 - sat->cosio2;
+    sat->cc4 = 2.0 * sat->no_unkozai * coef1 * sat->ao * sat->omeosq
+             * (sat->eta * (2.0 + 0.5 * etasq)
+                + sat->ecco * (0.5 + 2.0 * etasq)
+                - WGS72_J2 * tsi / (sat->ao * psisq)
+                  * (-3.0 * sat->con41
+                       * (1.0 - 2.0 * eeta + etasq * (1.5 - 0.5 * eeta))
+                     + 0.75 * sat->x1mth2
+                       * (2.0 * etasq - eeta * (1.0 + etasq))
+                       * cos(2.0 * sat->argpo)));
+    sat->cc5 = 2.0 * coef1 * sat->ao * sat->omeosq
+             * (1.0 + 2.75 * (etasq + eeta) + eeta * etasq);
+
+    double cosio4 = sat->cosio2 * sat->cosio2;
+    double temp1  = 1.5 * WGS72_J2 * pinvsq * sat->no_unkozai;
+    double temp2  = 0.5 * temp1 * WGS72_J2 * pinvsq;
+    double temp3  = -0.46875 * WGS72_J4 * pinvsq * pinvsq * sat->no_unkozai;
+
+    sat->mdot = sat->no_unkozai
+              + 0.5 * temp1 * sat->rteosq * sat->con41
+              + 0.0625 * temp2 * sat->rteosq
+                * (13.0 - 78.0 * sat->cosio2 + 137.0 * cosio4);
+    sat->argpdot = -0.5 * temp1 * sat->con42
+                 + 0.0625 * temp2 * (7.0 - 114.0 * sat->cosio2 + 395.0 * cosio4)
+                 + temp3 * (3.0 - 36.0 * sat->cosio2 + 49.0 * cosio4);
+    double xhdot1 = -temp1 * sat->cosio;
+    sat->nodedot = xhdot1
+                 + (0.5 * temp2 * (4.0 - 19.0 * sat->cosio2)
+                    + 2.0 * temp3 * (3.0 - 7.0 * sat->cosio2)) * sat->cosio;
+
+    sat->omgcof = sat->bstar * cc3 * cos(sat->argpo);
+    sat->xmcof  = 0.0;
+    if (sat->ecco > 1.0e-4) {
+        sat->xmcof = -x2o3 * coef * sat->bstar / eeta;
+    }
+
+    sat->nodecf = 3.5 * sat->omeosq * xhdot1 * sat->cc1;
+    sat->t2cof  = 1.5 * sat->cc1;
+
+    /* xlcof / aycof — guard against the i = 180° pole singularity. */
+    const double cosio_eps = 1.5e-12;
+    if (fabs(sat->cosio + 1.0) > cosio_eps) {
+        sat->xlcof = -0.25 * WGS72_J3OJ2 * sat->sinio
+                   * (3.0 + 5.0 * sat->cosio) / (1.0 + sat->cosio);
+    } else {
+        sat->xlcof = -0.25 * WGS72_J3OJ2 * sat->sinio
+                   * (3.0 + 5.0 * sat->cosio) / cosio_eps;
+    }
+    sat->aycof = -0.5 * WGS72_J3OJ2 * sat->sinio;
+
+    double delmotemp = 1.0 + sat->eta * cos(sat->mo);
+    sat->delmo  = delmotemp * delmotemp * delmotemp;
+    sat->sinmao = sin(sat->mo);
+    sat->x7thm1 = 7.0 * sat->cosio2 - 1.0;
+
+    /* ---- Step 7: deep-space classification ---- */
+    if ((TWOPI / sat->no_unkozai) >= 225.0) {
+        sat->deep_space = 1;
+        sat->isimp      = 1;     /* deep-space implies simplified drag */
+        /* dscom/dpper/dsinit lands in Phase 4. The propagator (Phase 3)
+         * checks deep_space and returns SAT_DEEP_SPACE. */
+    }
+
+    /* ---- Step 8: t-power coefficients for full near-Earth drag ----- */
+    if (!sat->isimp) {
+        double cc1sq = sat->cc1 * sat->cc1;
+        sat->d2 = 4.0 * sat->ao * tsi * cc1sq;
+        double tmp = sat->d2 * tsi * sat->cc1 / 3.0;
+        sat->d3 = (17.0 * sat->ao + sfour) * tmp;
+        sat->d4 = 0.5 * tmp * sat->ao * tsi
+                * (221.0 * sat->ao + 31.0 * sfour) * sat->cc1;
+        sat->t3cof = sat->d2 + 2.0 * cc1sq;
+        sat->t4cof = 0.25 * (3.0 * sat->d3
+                           + sat->cc1 * (12.0 * sat->d2 + 10.0 * cc1sq));
+        sat->t5cof = 0.2 * (3.0 * sat->d4
+                          + 12.0 * sat->cc1 * sat->d3
+                          + 6.0 * sat->d2 * sat->d2
+                          + 15.0 * cc1sq * (2.0 * sat->d2 + cc1sq));
+    }
+
+    sat->error = 0;
     return SAT_OK;
 }

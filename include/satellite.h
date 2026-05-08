@@ -57,9 +57,50 @@ typedef struct {
 } SatelliteTLE;
 
 /*
- * Forward declaration — SatelliteModel holds SGP4 coefficients and is
- * sized in Phase 2. For now callers only use SatelliteTLE.
+ * SGP4 model record.
+ *
+ * The struct is public so callers can stack-allocate it, but every field
+ * other than `deep_space` and `error` is internal — names are kept close
+ * to Vallado/Hoots-Roehrich for cross-reference debugging. Don't rely on
+ * field meanings outside src/satellite.c.
  */
+struct SatelliteModel {
+    /* ---- TLE elements in SGP4 units (filled by satellite_model_init) -- */
+    double bstar;          /* drag, 1/ER                                 */
+    double ecco;           /* eccentricity, 0..1                         */
+    double argpo;          /* argument of perigee, rad                    */
+    double inclo;          /* inclination, rad                            */
+    double mo;             /* mean anomaly at epoch, rad                  */
+    double no_kozai;       /* TLE mean motion, rad/min (Kozai form)       */
+    double nodeo;          /* RAAN, rad                                   */
+    double jdsatepoch;     /* epoch JD UT                                 */
+
+    /* ---- Initialised auxiliary quantities ---------------------------- */
+    double ao;             /* semi-major axis, Earth radii                */
+    double no_unkozai;     /* un-Kozai mean motion, rad/min               */
+    double eccsq, omeosq, rteosq;
+    double sinio, cosio, cosio2;
+    double con41, con42;
+    double posq, ainv, rp;
+    double gsto;           /* GMST at epoch, rad (SGP4 form)              */
+
+    /* ---- Near-Earth secular + periodic coefficients ------------------ */
+    double cc1, cc4, cc5;
+    double mdot, argpdot, nodedot, nodecf;
+    double omgcof, xmcof;
+    double xlcof, aycof;
+    double x1mth2, x7thm1;
+    double sinmao, delmo, eta;
+
+    /* t-power drag coefficients (only when isimp == 0) */
+    double d2, d3, d4;
+    double t2cof, t3cof, t4cof, t5cof;
+
+    /* ---- Flags ------------------------------------------------------- */
+    int isimp;             /* simplified drag (perigee < 220 km)          */
+    int deep_space;        /* 1 = period >= 225 min, refused until Phase 4 */
+    int error;             /* last propagator error code, 0 = ok          */
+};
 typedef struct SatelliteModel SatelliteModel;
 
 /*
