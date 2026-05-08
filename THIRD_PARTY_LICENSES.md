@@ -42,66 +42,35 @@ include it in their distribution.
 
 ---
 
-## 2. BSD 3-Clause License  —  d3-celestial constellation lines
+## 2. GNU General Public License, version 2  —  Stellarium "modern_iau" skyculture
 
-**Applies to:** `sky_lines[]` array in `src/skydata.c`. Permissive
-license — the voidwatch binary is **not** copylefted by this data.
-**Source:** © 2015 Olaf Frohn — https://github.com/ofrohn/d3-celestial
-**License URL:** https://opensource.org/license/bsd-3-clause/
-**d3-celestial LICENSE:** https://github.com/ofrohn/d3-celestial/blob/master/LICENSE
-
-### Verbatim copyright + disclaimer (BSD-3-Clause §1 / §2)
-
-> Copyright (c) 2015, Olaf Frohn
-> All rights reserved.
->
-> Redistribution and use in source and binary forms, with or without
-> modification, are permitted provided that the following conditions
-> are met:
->
-> 1. Redistributions of source code must retain the above copyright
->    notice, this list of conditions and the following disclaimer.
->
-> 2. Redistributions in binary form must reproduce the above copyright
->    notice, this list of conditions and the following disclaimer in
->    the documentation and/or other materials provided with the
->    distribution.
->
-> 3. Neither the name of the copyright holder nor the names of its
->    contributors may be used to endorse or promote products derived
->    from this software without specific prior written permission.
->
-> THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-> "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-> LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-> FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-> COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-> INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-> BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-> LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-> CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-> LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-> ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-> POSSIBILITY OF SUCH DAMAGE.
+**Applies to:** `sky_lines[]` array in `src/skydata.c`. Because this is
+linked into the compiled binary, **the voidwatch binary as distributed
+is a combined work governed by GPL-2.0**.
+**Source:** Stellarium project — https://github.com/Stellarium/stellarium
+(skycultures/modern_iau/index.json)
+**License URL:** https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+**Stellarium's COPYING:** https://github.com/Stellarium/stellarium/blob/master/COPYING
 
 ### Key obligations voidwatch meets
 
-- §1 (source-form notice) — Olaf Frohn's copyright + disclaimer are
-  reproduced above and in the `src/skydata.c` per-array header block.
-- §2 (binary-form notice) — this file plus `LICENSE` accompany binary
-  distributions of voidwatch and reproduce the copyright + disclaimer.
-- §3 (no endorsement) — voidwatch does not use Olaf Frohn's name or
-  contributors' names to endorse or promote the project.
+- **Source availability** (§3(a)) — voidwatch source is publicly
+  hosted at https://codeberg.org/cdubz/voidwatch.git . Recipients of
+  any voidwatch binary have access to the corresponding source.
+- **License notice** (§1) — the GPL-2.0 dependency is documented in
+  `LICENSE`, `CITATIONS.md`, and the header of `src/skydata.c`.
+- **Modified-files notice** (§2(a)) — `src/skydata.c` is auto-generated
+  and clearly marked as a derivative; `tools/gen_skydata.py` shows the
+  exact transformation.
 
-### Why d3-celestial replaced the previous Stellarium import
+### Full text
 
-Earlier voidwatch versions used Stellarium's `modern_iau` skyculture
-(GPL-2.0) for the constellation-line data. GPL-2.0 would have made the
-voidwatch binary a GPL-2.0 combined work — legally fine but inconsistent
-with the rest of voidwatch's posture. d3-celestial encodes the same
-Western IAU 88-figure conventions under BSD-3-Clause, and the swap
-restored a clean per-component license model where no copyleft term
-applies to the binary.
+The full legal text of the GNU General Public License version 2 is
+available at the URL above. By reference, voidwatch incorporates it
+here for the sections of the codebase derived from Stellarium.
+Redistributors of the binary must satisfy GPL-2.0 in their own
+distribution channel — either by shipping source alongside, or by
+offering a written guarantee of source access per GPL-2.0 §3(b).
 
 ---
 
@@ -159,32 +128,25 @@ References:
 
 ---
 
-## Building from source under stricter licensing constraints
+## Building from source without GPL contamination
 
-The voidwatch binary as distributed is **free of GPL contamination**
-(d3-celestial replaced Stellarium for `sky_lines[]` on 2026-05-08).
-The remaining copyleft obligation is CC BY-SA 2.5 on the HYG-derived
-`sky_stars[]` table.
+If your downstream use case is incompatible with GPL-2.0 (e.g., you
+need pure-MIT for proprietary integration), you can build a clean
+voidwatch by:
 
-If your downstream use case is incompatible with CC BY-SA 2.5 (e.g.,
-you need a strict permissive-only data layer for proprietary
-integration without share-alike), you can rebuild voidwatch by:
+1. Replacing `tools/data/stellarium_modern.json` with a
+   public-domain or permissively-licensed constellation-line source.
+   The IAU constellation *boundaries* are factual; the *line figures*
+   are conventional but were popularised by various PD star atlases
+   (e.g., the Yale Bright Star Atlas, the U.S. Naval Observatory's
+   atlases). Hand-curating the ~88 figures' ~700 line segments is a
+   long afternoon's work.
+2. Re-running `python3 tools/gen_skydata.py`.
+3. Updating `LICENSE` and this file to reflect the new lineage.
 
-1. Swapping `tools/data/hyg_v36_1.csv` for the raw Yale Bright Star
-   Catalog (BSC5, broadly considered factual / public domain). HYG
-   itself aggregates BSC5 + Hipparcos + Gliese, all of which originate
-   in non-copyrighted scientific data. You'd lose HYG's curated
-   editorial choices but the underlying numbers are PD.
-2. Adapting `tools/gen_skydata.py`'s `parse_hyg()` to read BSC5's
-   field layout instead of HYG's CSV.
-3. Updating `LICENSE`, this file, and `src/skydata.c`'s header to
-   reflect the new lineage.
-
-This is more invasive than the d3-celestial swap was (BSC5 has no
-"proper name" column, so you'd need to attach IAU names from a
-separate PD list). For most downstream users CC BY-SA 2.5 is
-acceptable as long as the attribution and share-alike notice on
-the data table survive.
+The `sky_stars[]` HYG table can stay; CC BY-SA 2.5 is compatible with
+permissive-licensed code projects as long as the data attribution
+and share-alike survive.
 
 ---
 

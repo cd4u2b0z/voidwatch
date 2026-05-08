@@ -2,51 +2,32 @@
 """Generator for src/skydata.c.
 
 Reads from tools/data/:
-  hyg_v36_1.csv             HYG v3.6.1 (CSV, decompressed). HIP, RA, Dec,
-                            Mag, spectral class, IAU proper name, Bayer.
-  d3celestial_lines.json    d3-celestial constellation-line GeoJSON
-                            (Olaf Frohn, BSD-3-Clause). MultiLineString
-                            features with [ra_deg, dec_deg] coordinates,
-                            one feature per IAU constellation.
+  hyg_v36_1.csv          HYG v3.6.1 (CSV, decompressed). HIP, RA, Dec,
+                         Mag, spectral class, IAU proper name, Bayer.
+  stellarium_modern.json Stellarium "modern" skyculture index.json:
+                         constellations + their polylines as HIP IDs.
 
 Emits:
-  src/skydata.c             Baked-in star + constellation tables.
+  src/skydata.c          Baked-in star + constellation tables.
 
 Run from repo root:
   python3 tools/gen_skydata.py
 
 The generator filters HYG to mag <= MAG_CUTOFF (default 6.5 — naked-eye
-limit, matches the Yale Bright Star Catalog footprint). Each
-constellation-line endpoint is matched to the nearest star in the
-filtered table by angular distance; if no match within MATCH_TOL_DEG
-exists, the segment is dropped.
+limit, matches the Yale Bright Star Catalog footprint). Constellation
+line endpoints whose HIP isn't in the filtered set are dropped.
 
 Sources:
   - HYG Database (CC BY-SA 2.5, https://www.astronexus.com/hyg)
-  - d3-celestial constellation lines (BSD-3-Clause, © 2015 Olaf Frohn,
-    https://github.com/ofrohn/d3-celestial)
+  - Stellarium "modern" skyculture (GPL-2.0)
   - Underlying: Hipparcos / Yale BSC5 / IAU named-star list
-
-Why d3-celestial: Stellarium's `modern_iau` skyculture is the obvious
-reference set but it ships GPL-2.0, which would contaminate voidwatch's
-binary. d3-celestial encodes the same Western IAU 88-figure conventions
-under BSD-3-Clause. We swap sources, keep the same constellation
-geometry, and the voidwatch binary stays free of GPL.
 
 The generated src/skydata.c is committed; end users build voidwatch
 without Python or network access. This script only re-runs when the
 catalogs are updated.
-
-To refresh upstream caches:
-    curl -L -o tools/data/hyg_v36_1.csv.gz \\
-        https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/v3/hyg_v36_1.csv.gz
-    gunzip -kf tools/data/hyg_v36_1.csv.gz
-    curl -L -o tools/data/d3celestial_lines.json \\
-        https://raw.githubusercontent.com/ofrohn/d3-celestial/master/data/constellations.lines.json
 """
 import csv
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -54,11 +35,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "tools" / "data"
 OUT  = ROOT / "src" / "skydata.c"
 
-HYG_PATH   = DATA / "hyg_v36_1.csv"
-LINES_PATH = DATA / "d3celestial_lines.json"
+HYG_PATH = DATA / "hyg_v36_1.csv"
+STC_PATH = DATA / "stellarium_modern.json"
 
-MAG_CUTOFF     = 6.5    # naked-eye limit; matches BSC5 footprint
-MATCH_TOL_DEG  = 1.0    # endpoint → nearest star tolerance, degrees
+MAG_CUTOFF = 6.5
 
 def fail(msg):
     sys.stderr.write(f"gen_skydata: {msg}\n")
@@ -115,66 +95,16 @@ def parse_hyg(path):
             }
 
 
-def parse_d3celestial(path):
-    """Yield (constellation_id, [(ra_deg, dec_deg), ...]) polylines.
-    Each MultiLineString in the GeoJSON feature collection contains
-    one or more line segments expressed as a list of [ra, dec]
-    coordinate pairs (degrees, J2000).
-
-    GeoJSON convention: longitudes wrap at ±180°, so d3-celestial
-    encodes RA values in [180, 360) as negative numbers
-    (e.g. RA 354.5° → -5.5° in the JSON). HYG stores RA in hours
-    [0, 24) which we already convert to [0, 360°). Normalise the
-    d3-celestial values to [0, 360°) here so the nearest-star match
-    operates in a single coordinate system."""
+def parse_stellarium(path):
+    """Yield (constellation_id, [hip, ...]) polylines."""
     if not path.exists():
         fail(f"missing {path} — see the docstring for the URL")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    for feat in data.get("features", []):
-        cid = feat.get("id") or feat.get("properties", {}).get("name") or "?"
-        geom = feat.get("geometry") or {}
-        if geom.get("type") != "MultiLineString":
-            continue
-        for polyline in geom.get("coordinates", []):
-            if not isinstance(polyline, list) or len(polyline) < 2:
-                continue
-            normed = []
-            for p in polyline:
-                if len(p) < 2: continue
-                ra_deg, dec_deg = p[0], p[1]
-                if ra_deg < 0.0: ra_deg += 360.0
-                normed.append((ra_deg, dec_deg))
-            yield cid, normed
-
-
-def angular_dist_sq_deg(ra1_deg, dec1_deg, ra2_deg, dec2_deg):
-    """Approximate angular distance² in deg², using flat-sky cos(dec)
-    correction on RA. Wraps RA across the 0/360° seam (a star at
-    RA 359° is 2° from a star at RA 1°, not 358°). Good to ~0.01°
-    for nearby points and avoids haversine cost across 700×8870
-    endpoint comparisons."""
-    dra = ra1_deg - ra2_deg
-    if   dra >  180.0: dra -= 360.0
-    elif dra < -180.0: dra += 360.0
-    cos_dec = math.cos(math.radians(0.5 * (dec1_deg + dec2_deg)))
-    dra *= cos_dec
-    ddec = dec1_deg - dec2_deg
-    return dra * dra + ddec * ddec
-
-
-def nearest_star(ra_deg, dec_deg, stars, tol_deg):
-    """Return the index of the nearest star within tol_deg, or None.
-    Brute-force scan — 700 endpoints × 8870 stars is <10M comparisons,
-    well under a second in plain Python."""
-    tol_sq = tol_deg * tol_deg
-    best_i, best_d2 = None, tol_sq
-    for i, s in enumerate(stars):
-        ra_s_deg = s["ra_h"] * 15.0
-        d2 = angular_dist_sq_deg(ra_deg, dec_deg, ra_s_deg, s["dec_deg"])
-        if d2 < best_d2:
-            best_d2 = d2
-            best_i = i
-    return best_i
+    data = json.loads(path.read_text())
+    for con in data.get("constellations", []):
+        cid = con.get("id", "?")
+        for polyline in con.get("lines", []):
+            if isinstance(polyline, list) and len(polyline) >= 2:
+                yield cid, polyline
 
 
 def c_string_escape(s):
@@ -200,28 +130,20 @@ def main():
         deduped.append(s)
     stars = deduped
 
-    print(f"reading {LINES_PATH.name}", file=sys.stderr)
+    print(f"reading {STC_PATH.name}", file=sys.stderr)
     line_segs = []
     dropped_endpoints = 0
-    n_features = 0
-    for cid, polyline in parse_d3celestial(LINES_PATH):
-        n_features += 1
-        # Cache per-polyline endpoint resolution so we only do nearest-star
-        # lookups once per distinct endpoint, not once per segment side.
-        resolved = []
-        for ra_deg, dec_deg in polyline:
-            idx = nearest_star(ra_deg, dec_deg, stars, MATCH_TOL_DEG)
-            resolved.append(idx)
-        for i in range(len(resolved) - 1):
-            ai, bi = resolved[i], resolved[i + 1]
+    for cid, polyline in parse_stellarium(STC_PATH):
+        for i in range(len(polyline) - 1):
+            a_hip, b_hip = polyline[i], polyline[i + 1]
+            ai = hip_to_idx.get(a_hip)
+            bi = hip_to_idx.get(b_hip)
             if ai is None or bi is None:
                 dropped_endpoints += 1
                 continue
             line_segs.append((ai, bi))
-    print(f"  {n_features} constellation features, "
-          f"{len(line_segs)} segments emitted, "
-          f"{dropped_endpoints} dropped (endpoint > {MATCH_TOL_DEG}° "
-          f"from any mag<={MAG_CUTOFF} star)",
+    print(f"  {len(line_segs)} line segments, "
+          f"{dropped_endpoints} dropped (endpoint dimmer than mag {MAG_CUTOFF})",
           file=sys.stderr)
 
     print(f"writing {OUT}", file=sys.stderr)
@@ -253,24 +175,25 @@ def main():
         f.write(" * intact. The sky_stars[] data itself remains under CC BY-SA 2.5.\n")
         f.write(" *\n")
         f.write(" * ============================================================\n")
-        f.write(" * sky_lines[]  — BSD 3-Clause (d3-celestial)\n")
+        f.write(" * sky_lines[]  — GNU General Public License, version 2\n")
         f.write(" * ============================================================\n")
-        f.write(" * Derived from d3-celestial's `data/constellations.lines.json`,\n")
-        f.write(" * © 2015 Olaf Frohn.\n")
-        f.write(" * Source: https://github.com/ofrohn/d3-celestial\n")
-        f.write(" * Licence: https://opensource.org/license/bsd-3-clause/\n")
+        f.write(" * Derived from Stellarium's `skycultures/modern_iau/index.json`.\n")
+        f.write(" * Source: https://github.com/Stellarium/stellarium\n")
+        f.write(" * Licence: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html\n")
         f.write(" *\n")
-        f.write(" * Changes made (BSD-3-Clause attribution preserved):\n")
-        f.write(" *   - GeoJSON [RA, Dec] endpoint pairs were resolved to nearest\n")
-        f.write(f" *     stars in the filtered HYG table within {MATCH_TOL_DEG}°,\n")
-        f.write(" *   - emitted as pairs of indices into sky_stars[] for the C\n")
-        f.write(" *     renderer.\n")
+        f.write(" * Because this constellation-line data is compiled into the voidwatch\n")
+        f.write(" * binary, the resulting binary is a combined work distributed under\n")
+        f.write(" * GPL-2.0. Source for the combined work is publicly hosted at\n")
+        f.write(" * https://codeberg.org/cdubz/voidwatch.git, satisfying GPL-2.0 §3(a).\n")
         f.write(" *\n")
-        f.write(" * BSD-3-Clause is permissive (MIT-compatible); voidwatch's binary\n")
-        f.write(" * is therefore free of GPL contamination from this data source.\n")
-        f.write(" * Redistributors must preserve Olaf Frohn's copyright notice in\n")
-        f.write(" * documentation accompanying any redistribution — voidwatch does\n")
-        f.write(" * so via THIRD_PARTY_LICENSES.md and CITATIONS.md.\n")
+        f.write(" * Changes made: polylines were transformed from JSON arrays of HIP\n")
+        f.write(" * identifiers into pairs of indices into the filtered sky_stars[]\n")
+        f.write(" * table. Constellations whose stars all fall below V<=6.5 are omitted.\n")
+        f.write(" *\n")
+        f.write(" * If you fork voidwatch and need a clean MIT-only result, replace\n")
+        f.write(" * this array (and the Stellarium import in tools/gen_skydata.py)\n")
+        f.write(" * with a public-domain or permissively-licensed constellation-line\n")
+        f.write(" * source. See THIRD_PARTY_LICENSES.md for the recommended path.\n")
         f.write(" *\n")
         f.write(" * See CITATIONS.md for full upstream credits and references.\n")
         f.write(" */\n")

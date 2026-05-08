@@ -7,7 +7,7 @@
 ![Lines](https://img.shields.io/badge/lines-10k%20src%20%2B%201.7k%20tests%20%2B%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
-![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20d3--celestial%20%2B%2030%20DSOs-cyan)
+![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium%20%2B%2030%20DSOs-cyan)
 ![Satellites](https://img.shields.io/badge/satellites-SGP4%20%C2%B17nm%20vs%20Vallado-success)
 ![Tests](https://img.shields.io/badge/tests-9%2F9%20%E2%9C%93%20%E2%80%A2%20--validate%205%2F5-success)
 ![No deps](https://img.shields.io/badge/runtime%20deps-libc%20libm%20alsa%20fftw-success)
@@ -123,7 +123,7 @@ heliocentric — toggle with **`m`**.
 
 **Geocentric** (`m` = 0): observer's all-sky view, azimuthal-equidistant
 projection from zenith. 8870 stars (HYG v3.6.1, V ≤ 6.5), 88 IAU
-constellations (d3-celestial / Olaf Frohn, BSD), Sun + Moon + 8 planets
+constellations (Stellarium "modern" skyculture), Sun + Moon + 8 planets
 via Meeus, Milky Way band as a longitude-weighted Perlin overlay along
 the J2000 galactic equator. Bennett refraction lift, Kasten-Young
 airmass dimming, twilight horizon glow keyed off Sun altitude.
@@ -322,8 +322,8 @@ mkdir -p tools/data
 curl -L -o tools/data/hyg_v36_1.csv.gz \
     https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/v3/hyg_v36_1.csv.gz
 gunzip -k tools/data/hyg_v36_1.csv.gz
-curl -L -o tools/data/d3celestial_lines.json \
-    https://raw.githubusercontent.com/ofrohn/d3-celestial/master/data/constellations.lines.json
+curl -L -o tools/data/stellarium_modern.json \
+    https://raw.githubusercontent.com/Stellarium/stellarium/master/skycultures/modern/index.json
 
 python3 tools/gen_skydata.py     # regenerates src/skydata.c
 make
@@ -340,7 +340,7 @@ make
   three exotic body kinds (neutron star, black hole, nebula core).
 - **Astro mode** — real ephemeris with two perspectives (`m`):
   - **Geocentric**: 8870 stars (HYG v3.6.1), 88 IAU constellations
-    (d3-celestial), Sun + Moon + 8 planets (Meeus), Milky Way band,
+    (Stellarium), Sun + Moon + 8 planets (Meeus), Milky Way band,
     refraction + airmass extinction + twilight tint, sporadic meteors
     (~8/hr) + 9 named showers with per-shower colour & velocity,
     solar/lunar eclipses with live magnitude, planet-planet
@@ -410,20 +410,20 @@ in full before redistributing. Short summary:
 - **Original voidwatch source** — MIT.
 - **Bundled `sky_stars[]` (HYG Database)** — CC BY-SA 2.5
   (share-alike; redistribute the table portion under the same terms).
-- **Bundled `sky_lines[]` (d3-celestial constellation figures)** —
-  BSD-3-Clause (© 2015 Olaf Frohn). Permissive — preserve the
-  copyright notice + disclaimer in your distribution, no copyleft
-  obligation. Replaced an earlier Stellarium import on 2026-05-08
-  to free the voidwatch binary from GPL contamination.
+- **Bundled `sky_lines[]` (Stellarium constellation figures)** —
+  GPL-2.0. Because this data compiles into the binary, **the
+  voidwatch binary as distributed is a combined work governed by
+  GPL-2.0**. Source is publicly hosted, which satisfies GPL §3(a).
 - **JPL Horizons/SBDB orbital elements + SGP4 reference algorithm** —
   US Government public domain.
 - **CelesTrak TLE data** — factual; attribution requested.
 - **Vendored `stb_perlin.h`** — public domain / MIT-0 at the user's
   option.
 
-Forks that need a pure permissive-licensed data layer would need to
-replace the HYG-derived `sky_stars[]` with raw BSC5 (factual / PD) —
-see THIRD_PARTY_LICENSES.md for the path. The constellation-line layer
-is already permissive after the d3-celestial swap.
+Forks that need pure-MIT downstream can replace the Stellarium-derived
+constellation lines with a public-domain or permissively-licensed
+source (one afternoon's work — see THIRD_PARTY_LICENSES.md). The HYG
+star table can stay under CC BY-SA 2.5 as long as attribution +
+share-alike notices survive.
 
 Full data-source attribution lives in [CITATIONS.md](CITATIONS.md).

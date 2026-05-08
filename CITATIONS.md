@@ -20,15 +20,12 @@ data files, no network calls.
 
 ## Constellation figures
 
-- **d3-celestial constellation lines (88 IAU constellations)**
-  https://github.com/ofrohn/d3-celestial (BSD-3-Clause, © 2015 Olaf Frohn)
-  GeoJSON `[RA, Dec]` line endpoints from `data/constellations.lines.json`.
-  Each endpoint is matched to the nearest star in the filtered HYG table
-  within 1° during generation; ~742 segments survive the magnitude
-  filter, ≤1 endpoint drops per refresh because no V≤6.5 star sits
-  near it. This source replaced an earlier Stellarium import (GPL-2.0)
-  on 2026-05-08 to keep the voidwatch binary free of copyleft
-  obligations.
+- **Stellarium "modern" skyculture (88 IAU constellations)**
+  https://github.com/Stellarium/stellarium (GPL-2.0)
+  Polylines from `skycultures/modern/index.json`. HIP indices are
+  remapped to the filtered HYG star table during generation. 692 line
+  segments survive the magnitude filter; ~3 endpoints are dropped per
+  refresh because their stars sit dimmer than the cutoff.
 
 ## Solar system
 

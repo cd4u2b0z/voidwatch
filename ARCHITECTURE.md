@@ -12,7 +12,7 @@ inside of the build.
 Companion docs:
 - `README.md` — user-facing intro
 - `ASTRONOMY.md` — per-algorithm citations (Meeus chapters, etc.)
-- `CITATIONS.md` — data-source credits (HYG, d3-celestial, JPL, IAU)
+- `CITATIONS.md` — data-source credits (HYG, Stellarium, JPL, IAU)
 
 ---
 
@@ -151,7 +151,7 @@ These weren't all there on day one. Some emerged from pain (see
 |  +-----+---------------+    +---------------------------+            |
 |  |  Audio worker       |    |  Compile-time catalogues  |            |
 |  |  (ALSA + FFTW3)     |    |  HYG (~8870 stars),       |            |
-|  |  thread, snapshot   |    |  d3-celestial constellations,|         |
+|  |  thread, snapshot   |    |  Stellarium constellations,|           |
 |  |  via mutex          |    |  Messier/NGC DSOs,        |            |
 |  +---------------------+    |  meteor showers, comets,  |            |
 |                              |  asteroids                |            |
@@ -560,14 +560,11 @@ I picked HYG over BSC5 because HYG already aggregates the cross-refs.
 With BSC5 you'd need a parallel name database and a join step.
 
 The pipeline is a two-stage thing: maintainer-only Python generator
-reads `tools/data/hyg_v36_1.csv` + `tools/data/d3celestial_lines.json`
-and emits `src/skydata.c` (8870 stars at V≤6.5, ~742 constellation
+reads `tools/data/hyg_v36_1.csv` + `tools/data/stellarium_modern.json`
+and emits `src/skydata.c` (8870 stars at V≤6.5, ~692 constellation
 line segments). The `tools/data/` directory is gitignored. The
 generated `src/skydata.c` is committed. End users build with no
-Python and no network. (d3-celestial replaced an earlier Stellarium
-import 2026-05-08 — Stellarium's GPL-2.0 was contaminating the
-binary; d3-celestial is BSD-3-Clause and encodes the same Western
-IAU 88-figure conventions.)
+Python and no network.
 
 > **PRO MOVE** — When you need a big catalogue, two-stage build is
 > almost always the right answer. Stage 1 is "fetch / parse / curate"
@@ -802,16 +799,11 @@ Not software, but it's the most-used "library" in the project. Every
 ephemeris formula traces to a chapter and equation. The
 `--validate` test references its worked examples directly.
 
-### HYG database v3.6.1 + d3-celestial constellation lines
+### HYG database v3.6.1 + Stellarium constellation modern.json
 
-The catalogues. HYG at `astronexus.com/projects/hyg`; d3-celestial's
-`data/constellations.lines.json` (Olaf Frohn, BSD-3-Clause). Both
-bundled at compile time, both credited in CITATIONS.md.
-
-(d3-celestial replaced an earlier Stellarium `modern_iau` import on
-2026-05-08. Stellarium ships GPL-2.0, which would have made the
-voidwatch binary a GPL-2.0 combined work; d3-celestial encodes the
-same Western IAU 88-figure conventions under a permissive licence.)
+The catalogues. HYG at `astronexus.com/projects/hyg`; Stellarium's
+constellation art is `share/stellarium/skycultures/modern_iau`.
+Both bundled at compile time, both credited in CITATIONS.md.
 
 ### What's NOT used (and why)
 
@@ -842,7 +834,7 @@ voidwatch/
   README.md          User-facing intro + screenshots
   ARCHITECTURE.md    This file (build journey + design narrative)
   ASTRONOMY.md       Per-algorithm citations (Meeus chapters, etc.)
-  CITATIONS.md       Data-source credits (HYG, d3-celestial, JPL, IAU)
+  CITATIONS.md       Data-source credits (HYG, Stellarium, JPL, IAU)
   LICENSE            MIT
   Makefile           single-file glob build, -MMD/-MP dep tracking
   compile_commands.json   clangd manifest
@@ -877,7 +869,7 @@ voidwatch/
   src/               implementations (one .c per .h)
 
   tools/             maintainer-only scripts
-    gen_skydata.py   reads HYG + d3-celestial, emits src/skydata.c
+    gen_skydata.py   reads HYG + Stellarium, emits src/skydata.c
     data/            gitignored cache of upstream catalogues
 
   docs/              demo recordings (VHS .tape source + .gif output)
@@ -967,7 +959,7 @@ universal.
 IAU proper name (HYG's `proper` column) and fall back to Bayer
 designation. Generated `.c` is ~440KB.
 
-### d3-celestial constellation lines → src/skydata.c (~742 segments)
+### Stellarium modern.json → src/skydata.c (~692 segments)
 
 Same generator parses the constellation lines. Each segment is
 `{ star_idx_a, star_idx_b }` referencing the bundled star table.
@@ -1176,7 +1168,7 @@ If you want to understand voidwatch in 30 minutes:
 
 `ASTRONOMY.md` is the per-algorithm citations doc — every Meeus
 chapter, every constant, every reference. `CITATIONS.md` credits the
-data sources (HYG, d3-celestial, JPL, IAU). Three docs, three
+data sources (HYG, Stellarium, JPL, IAU). Three docs, three
 audiences:
 
 - README → users

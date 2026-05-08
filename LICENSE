@@ -58,35 +58,31 @@ notice intact for that data section. Source URL of HYG:
 https://github.com/astronexus/HYG-Database
 
 ================================================================================
-3. BUNDLED CONSTELLATION LINES — BSD-3-Clause  (d3-celestial)
+3. BUNDLED CONSTELLATION LINES — GPL-2.0  (Stellarium "modern_iau" skyculture)
 ================================================================================
 
-The `sky_lines[]` array in `src/skydata.c` is derived from d3-celestial's
-`data/constellations.lines.json` (© 2015 Olaf Frohn, BSD-3-Clause):
+The `sky_lines[]` array in `src/skydata.c` is derived from Stellarium's
+`skycultures/modern_iau/index.json`. Stellarium is licensed under the GNU
+General Public License version 2:
 
-    https://github.com/ofrohn/d3-celestial
-    https://github.com/ofrohn/d3-celestial/blob/master/LICENSE
+    https://github.com/Stellarium/stellarium/blob/master/COPYING
 
-BSD-3-Clause is permissive (MIT-compatible) — it imposes no copyleft
-obligation on the voidwatch binary. Redistributors must:
+Per GPL-2.0 §2, the *combined work* (the voidwatch binary linked together
+with this constellation-line data) is therefore distributed under GPL-2.0.
+That means anyone receiving a voidwatch binary has the rights granted by
+GPL-2.0 over the binary, including the right to receive the corresponding
+source code. voidwatch's source code is publicly hosted; that satisfies the
+"source must accompany the binary" requirement.
 
-    1. Retain the d3-celestial copyright notice + license disclaimer in
-       documentation accompanying the binary (THIRD_PARTY_LICENSES.md
-       satisfies this).
-    2. Not use Olaf Frohn's name or contributors' names to endorse or
-       promote derived products without written permission.
+Changes made: the polylines were transformed from JSON arrays of HIP
+identifiers into pairs of indices into voidwatch's filtered star table.
+Constellations whose stars all fall below the V≤6.5 magnitude cut are
+omitted.
 
-Changes made: the GeoJSON [RA, Dec] coordinate pairs were resolved to
-the nearest stars in voidwatch's filtered HYG table (V ≤ 6.5) within
-1° tolerance, then emitted as pairs of indices into `sky_stars[]`.
-Constellations or specific endpoints whose stars fall below V≤6.5 are
-omitted (≤1 endpoint dropped at current magnitude cut).
-
-This source replaces the Stellarium "modern_iau" skyculture import
-voidwatch previously used. Stellarium is GPL-2.0, which would have made
-the voidwatch binary a GPL-2.0 combined work. d3-celestial encodes the
-same Western IAU 88-figure conventions under a permissive license, so
-the voidwatch binary is now free of GPL contamination.
+If you want to redistribute voidwatch under MIT-only (without the GPL
+contamination), replace `sky_lines[]` and the Stellarium import in
+`tools/gen_skydata.py` with a public-domain or permissively-licensed
+constellation-line source.
 
 ================================================================================
 4. JPL HORIZONS / SBDB ORBITAL ELEMENTS — public domain (US Government work)
@@ -129,21 +125,17 @@ SUMMARY
 ================================================================================
 
 If you redistribute the voidwatch BINARY, you are redistributing a combined
-work whose effective licence is the share-alike-strongest in the combination
-— that is **CC BY-SA 2.5**, applying to the bundled HYG star data.
-The original voidwatch source remains MIT, the constellation lines are
-BSD-3-Clause (permissive), and the JPL/SGP4/CelesTrak components carry
-no copyleft. Keep HYG attribution + share-alike notice intact and keep
-d3-celestial's BSD-3-Clause copyright + disclaimer in your documentation.
+work whose effective licence is GPL-2.0 (the strongest copyleft in the
+combination). Provide source access. Keep HYG / Stellarium attribution
+intact.
 
 If you redistribute the SOURCE TREE without modification, the per-component
 licences above govern each component independently.
 
-If you fork voidwatch and want a clean MIT-only result, you would need to
-replace the HYG-derived `sky_stars[]` with a public-domain star catalog
-(BSC5 raw data is broadly considered factual / PD; rebuilding skydata.c
-against it is straightforward but involves redoing the IAU proper-name
-attachment).
+If you fork voidwatch and want a clean MIT-only result, replace the
+Stellarium-derived `sky_lines[]` with a public-domain or MIT-compatible
+constellation-line source. The HYG star table can stay as long as the
+CC BY-SA 2.5 attribution + share-alike notice survive.
 
-For the full text of CC BY-SA 2.5 and BSD-3-Clause, see
-THIRD_PARTY_LICENSES.md or the upstream URLs listed above.
+For the full text of CC BY-SA 2.5 and GPL-2.0, see THIRD_PARTY_LICENSES.md
+or the upstream URLs listed above.

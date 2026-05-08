@@ -9,7 +9,7 @@ The companion documents:
 
 - `README.md` — user-facing intro
 - `ARCHITECTURE.md` — build journey, design decisions, the *why*
-- `CITATIONS.md` — credits the **data** sources (HYG, d3-celestial,
+- `CITATIONS.md` — credits the **data** sources (HYG, Stellarium,
   JPL Horizons, JPL SBDB, IAU, RASC). This file credits the
   **algorithm** sources (Meeus, Standish, Bennett, Kasten-Young, etc.).
 
@@ -951,7 +951,7 @@ does *not* apply, with notes on why:
 
 ### Data sources
 
-For catalogue / ephemeris data sources (HYG, d3-celestial, JPL
+For catalogue / ephemeris data sources (HYG, Stellarium, JPL
 Horizons, JPL SBDB, IAU Constellations, RASC), see `CITATIONS.md`.
 
 ---
