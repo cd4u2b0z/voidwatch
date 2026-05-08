@@ -288,6 +288,7 @@ int main(int argc, char **argv) {
     astro.show_star_backdrop = 1;      /* parallax backdrop on by default */
     astro.show_dso           = 1;      /* DSOs visible by default in geo */
     astro.show_satellites    = 1;      /* bundled sat overlay on by default */
+    astro.bright_boost       = 1.0f;   /* recomputed per frame from astro_speed */
     /* astro.show_aurora stays 0 — most observers are at mid-latitudes
      * where aurora isn't visible. Press `a` to force-render. */
     if (astro_mode) {
@@ -637,6 +638,12 @@ int main(int argc, char **argv) {
                 decay = 0.92f - 0.42f * t;
             }
             fb_decay(&fb, decay);
+            /* Compensate fb_add steady-state for the decay drop. At the
+             * 0.92 baseline, accumulation factor is 1/0.08 ≈ 12.5; at
+             * 0.50 it's 2. To keep perceived brightness flat across the
+             * scrub range, body stamps multiply per-frame intensity by
+             * (1-decay)/0.08, which is 1.0 at 1× and ~6.25 at ≥1000×. */
+            astro.bright_boost = (1.0f - decay) / 0.08f;
         }
         else if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
         else                                 fb_clear(&fb);

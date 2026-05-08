@@ -911,6 +911,7 @@ static void asteroids_draw(const AstroState *st, Framebuffer *fb) {
 
         Color tint = tint_base;
         apply_extinction(a->alt_rad, &tint, &intensity);
+        intensity *= st->bright_boost;
 
         float sigma = 0.85f;
         float two_sigma_sq = 2.0f * sigma * sigma;
@@ -1194,6 +1195,7 @@ static void comets_draw(const AstroState *st, Framebuffer *fb,
 
         Color tint = head_tint;
         apply_extinction(c->alt_rad, &tint, &intensity);
+        intensity *= st->bright_boost;
 
         /* Head: small Gaussian — slightly bigger σ than a star at the
          * same magnitude, so it reads as fuzzy not point-like. */
@@ -2134,7 +2136,7 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
      * disc would imply. */
     AstroStyle sun = style_for(EPHEM_SUN);
     sun.radius_sub = 4.0f;
-    sun.intensity  = 2.2f;
+    sun.intensity  = 2.2f * st->bright_boost;
     stamp_body(fb, cx, cy, &sun);
 
     /* Earth — explicit body in heliocentric. Cool blue dot. */
@@ -2142,7 +2144,8 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
     ephem_earth_helio_xyz(st->jd, &ex, &ey, &ez);
     float esx, esy;
     helio_map_au(cx, cy, r_scale, ex, ey, &esx, &esy);
-    AstroStyle earth = { {0.45f, 0.65f, 0.95f}, 1.4f, 1.3f, 0.40f };
+    AstroStyle earth = { {0.45f, 0.65f, 0.95f}, 1.4f,
+                         1.3f * st->bright_boost, 0.40f };
     stamp_body(fb, esx, esy, &earth);
 
     /* Other planets. */
@@ -2152,6 +2155,7 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
         float sx, sy;
         helio_map_au(cx, cy, r_scale, px, py, &sx, &sy);
         AstroStyle s = style_for((EphemBody)b);
+        s.intensity *= st->bright_boost;
         stamp_body(fb, sx, sy, &s);
     }
 
@@ -2230,7 +2234,7 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
         if (sx < 0 || sy < 0 || sx >= fb->sub_w || sy >= fb->sub_h) continue;
 
         /* Head dot. */
-        AstroStyle head = { comet_tint, 1.4f, 0.9f, 0.30f };
+        AstroStyle head = { comet_tint, 1.4f, 0.9f * st->bright_boost, 0.30f };
         stamp_body(fb, sx, sy, &head);
 
         /* Tail: outward from Sun. Length grows as r → q (perihelion). */
@@ -2262,7 +2266,7 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
         float sx, sy;
         helio_map_au(cx, cy, r_scale, ax, ay, &sx, &sy);
         if (sx < 0 || sy < 0 || sx >= fb->sub_w || sy >= fb->sub_h) continue;
-        AstroStyle s = { ast_tint, 0.85f, 0.7f, 0.20f };
+        AstroStyle s = { ast_tint, 0.85f, 0.7f * st->bright_boost, 0.20f };
         stamp_body(fb, sx, sy, &s);
     }
 }
@@ -2347,6 +2351,10 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
         if (project(fb->sub_w, fb->sub_h, p->alt_rad, p->az_rad, &sx, &sy) != 0)
             continue;
         AstroStyle s = style_for((EphemBody)i);
+        /* Speed-aware intensity compensation — see AstroState.bright_boost.
+         * Without this, planets dim ~6× when scrub speed pushes fb_decay
+         * down to suppress trails. */
+        s.intensity *= st->bright_boost;
         if ((EphemBody)i == EPHEM_MOON) {
             stamp_moon(fb, sx, sy, sun_sx, sun_sy, &s,
                        st->moon_elongation, lunar_f);

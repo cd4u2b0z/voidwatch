@@ -161,9 +161,20 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "  press ? to dismiss",
     };
     const int n_lines = (int)(sizeof lines / sizeof lines[0]);
-    const int W = 42;
+    /* W picks up the longest line + 4 cells (2 borders + 2 spaces of
+     * breathing room), clamped to the terminal width. The hardcoded
+     * W=42 used to truncate the ~63-char "search:" line silently and
+     * spill text past the right border. */
+    int longest = 0;
+    for (int i = 0; i < n_lines; i++) {
+        int n = (int)strlen(lines[i]);
+        if (n > longest) longest = n;
+    }
+    int W = longest + 4;
+    if (W < 42)        W = 42;
+    if (W > cols - 2)  W = cols - 2;
     const int H = n_lines + 2;
-    if (cols < W + 2 || rows < H + 2) return;
+    if (cols < 44 || rows < H + 2) return;
 
     int x0 = (cols - W) / 2 + 1;
     int y0 = (rows - H) / 2 + 1;
@@ -175,11 +186,11 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
     for (int i = 0; i < W - 2; i++) fputs("\xE2\x94\x80", out);
     fputs("\xE2\x95\xAE", out);
 
-    /* Body */
+    /* Body — `%-*.*s` left-pads AND truncates so a future too-long line
+     * can't escape the box. The width slot is W-2 in both cases. */
     for (int i = 0; i < n_lines; i++) {
         fprintf(out, "\x1b[%d;%dH\xE2\x94\x82", y0 + 1 + i, x0);
-        /* line, padded to W-2 cells */
-        fprintf(out, "%-*s", W - 2, lines[i]);
+        fprintf(out, "%-*.*s", W - 2, W - 2, lines[i]);
         fputs("\xE2\x94\x82", out);
     }
 

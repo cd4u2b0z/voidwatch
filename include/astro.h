@@ -104,6 +104,17 @@ typedef struct {
      * per-tick output. */
     SatelliteState satellites[SATELLITE_COUNT];
     int            show_satellites;       /* toggle key: i           */
+
+    /* Per-frame brightness compensation for fb_add stamps. main.c sets
+     * fb_decay between 0.92 (1× scrub) and 0.50 (≥1000× scrub) to
+     * suppress trails of fast-moving bodies. The drop in steady-state
+     * accumulation is up to 6.25× — without compensation, planets get
+     * dim at high scrub speed. main.c sets this each frame so stamps
+     * can multiply their per-frame intensity to keep the *steady-state*
+     * brightness constant across the scrub range.
+     *
+     * Default 1.0 means "no boost" (1× scrub baseline). */
+    float          bright_boost;
 } AstroState;
 
 /* Compute every body's geocentric + topocentric position from `now`. */
