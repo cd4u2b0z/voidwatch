@@ -27,8 +27,8 @@ asteroids — all from real catalogues, all baked into the binary).
 
 ![astro demo](docs/astro.gif)
 
-*(Astro demo: Charleston SC at real time → speed up 1000× → toggle constellation
-lines → search Halley → switch to heliocentric perspective.)*
+*(Astro demo: real ephemeris → speed up 10× → toggle constellation lines
+→ switch to heliocentric perspective → back to geocentric.)*
 
 [Quick start](#quick-start) · [Modes](#modes) · [Headless / one-shot](#headless--one-shot) · [Keys](#keys) · [Configuration](#configuration) · [Data](CITATIONS.md)
 

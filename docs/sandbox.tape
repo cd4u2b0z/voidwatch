@@ -11,17 +11,11 @@ Set Padding 20
 Set TypingSpeed 80ms
 
 # Run the sandbox: N-body sim, parallax stars, Perlin nebula, particles.
-# 14 seconds of ambient orbital motion is enough to see the trails breathe.
+# Pure ambient — let the orbital motion breathe for 22 seconds with
+# no key activity, the way you'd actually leave it running.
 Type "voidwatch --no-audio"
 Enter
-Sleep 14s
+Sleep 22s
 
-# Toggle the help overlay briefly so viewers see there's a key reference.
-Type "?"
-Sleep 2s
-Type "?"
-Sleep 1s
-
-# Quit cleanly.
 Type "q"
 Sleep 500ms
