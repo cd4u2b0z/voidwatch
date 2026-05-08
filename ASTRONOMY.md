@@ -772,17 +772,22 @@ sqrt reads better at terminal scale.
 > worked examples from Meeus 2e or JPL Horizons retrievals. All
 > deltas are arcminutes unless noted.
 
-Current cases (all PASS as of v1.0):
+Current cases (all PASS):
 
-| # | Test                  | Reference                                    | Tolerance |
-|---|-----------------------|----------------------------------------------|-----------|
-| 1 | Sun J2000             | Meeus 25.a (worked example, p. 165)          | 0.2′      |
-| 2 | Sun 2024-04-08 18 UT  | JPL Horizons (eclipse epoch)                 | 0.5′      |
-| 3 | Moon at Meeus 47.a    | Meeus 47.a worked answer (full ELP series)   | 0.5′      |
-| 4 | Venus at Meeus 33.a   | Meeus 33.a worked answer (abridged VSOP87)   | 6.0′      |
-| 5 | LST at known date     | Meeus 12.b worked example                    | 0.5′      |
+| #  | Test               | Reference                                       | Tol  | Observed |
+|----|--------------------|-------------------------------------------------|------|----------|
+|  1 | Sun J2000.0        | Meeus Ch. 25 / JPL Horizons cross-check         | 30′  |  2.4′    |
+|  2 | Sun Meeus 25.a     | Meeus 25.a (worked example, p. 165)             |  6′  |  0.2′    |
+|  3 | Sun 2024-04-08     | JPL Horizons (Great American Eclipse epoch)     | 30′  | 22.4′    |
+|  4 | Moon Meeus 47.a    | Meeus 47.a full-series answer                   | 30′  |  0.5′    |
+|  5 | Venus Meeus 33.a   | Meeus 33.a abridged-VSOP87 worked answer        | 15′  |  6.0′    |
+|  6 | Mercury J2000.0    | JPL Horizons (CENTER 500@399, QUANTITIES 1)     |  6′  |  0.5′    |
+|  7 | Mars J2000.0       | JPL Horizons (CENTER 500@399, QUANTITIES 1)     |  6′  |  0.3′    |
+|  8 | Jupiter J2000.0    | JPL Horizons (CENTER 500@399, QUANTITIES 1)     | 15′  |  5.9′    |
+|  9 | Saturn J2000.0     | JPL Horizons (CENTER 500@399, QUANTITIES 1)     | 15′  |  9.4′    |
 
-Source: `src/headless.c` (`headless_validate`).
+Source: `src/headless.c` (`headless_validate`). Run
+`voidwatch --validate` to print the table with current deltas.
 
 > **Why these cases:** Meeus's worked examples are the gold-
 > standard targets — every astronomer who has implemented Meeus has
@@ -790,11 +795,17 @@ Source: `src/headless.c` (`headless_validate`).
 > voidwatch's `--validate` answers the question "is this
 > implementation faithful to Meeus's published math?" definitively.
 > JPL Horizons provides the cross-check for "does it agree with the
-> world's reference ephemeris when extrapolated to a real date?"
+> world's reference ephemeris at a real date?" — the J2000.0 rows
+> for Mercury / Mars / Jupiter / Saturn confirm voidwatch's
+> Standish-element planet path lands inside the documented few-
+> arcminute precision band even for outer planets where Standish's
+> linear-rate model has the most slack.
 >
-> Future expansion: Mars/Jupiter/Saturn/Mercury at JPL-Horizons
-> reference epochs, comet at known apparition, asteroid at
-> opposition. Need verified Horizons retrievals for each.
+> Comet and asteroid validation cases are still open. Two-body
+> Keplerian propagation has different error characteristics
+> (accurate near perihelion, drifts at aphelion) and would need
+> per-body apparition-specific reference epochs. Tracked as a
+> low-priority open item.
 
 ---
 

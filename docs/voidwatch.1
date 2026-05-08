@@ -112,8 +112,12 @@ columns; with \fB\-\-json\fR, structured JSON for piping into
 .BR jq (1).
 .TP
 .B \-\-next \fIBODY\fR
-Find the next rise time for a planet, comet, asteroid, or DSO.
-Searches up to 30 days forward; prints local time and alt/az.
+Find the next rise time for a planet, comet, asteroid, DSO, or
+bundled satellite (by name, short name, or NORAD catalog number).
+Slow bodies use a 10-minute coarse step / 30-day horizon; satellites
+use 30 seconds / 7-day horizon since LEO passes are minutes long.
+Bisection on alt(t)=0 to ~30 s precision (~1 s for satellites).
+Prints local time and the time-to-rise.
 .TP
 .B \-\-year \fIYYYY\fR
 Annual almanac for the given Gregorian year. Eclipses,
@@ -125,10 +129,14 @@ Render one astro frame to stdout (ANSI truecolor + Braille) and exit.
 Default 80×40. Useful for status-bar refreshers and saved frames.
 .TP
 .B \-\-validate
-Run the internal sanity tests against Meeus's published worked
-examples and JPL Horizons references. Prints PASS/FAIL with delta
-in arcminutes for each check. Returns 0 if every test passed, 1 if
-any failed.
+Run the internal sanity tests (currently 9 PASS) against Meeus's
+published worked examples and JPL Horizons references. Includes
+Sun (3 cases, Meeus 25.a + JPL eclipse epoch), Moon (Meeus 47.a),
+Venus (Meeus 33.a), and Mercury / Mars / Jupiter / Saturn at
+J2000.0 cross-checked against JPL Horizons via
+.IR ssd.jpl.nasa.gov/api/horizons.api .
+Prints PASS/FAIL with delta in arcminutes per check. Returns 0 if
+every test passed, 1 if any failed.
 .TP
 .B \-\-update\-tle
 Refresh the bundled satellite TLE catalog from CelesTrak. Shells out
@@ -177,7 +185,8 @@ Astro mode (\fB\-\-astro\fR):
 0          reset speed + scrub
 , / .      scrub time -1h / +1h
 j          jump to next event (eclipse / conjunction / shower)
-/          search by name; auto-tracks the matched body
+/          search planet/comet/asteroid/DSO/satellite by name or
+           catalog number; jumps virtual clock to next rise + tracks
 m          toggle geo / helio view
 s          toggle decorative star backdrop
 g          toggle alt-az grid

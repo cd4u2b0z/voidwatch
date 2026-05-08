@@ -27,9 +27,9 @@
 
 `voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'`
 
-- Next rise time for any planet, comet, asteroid, or named DSO (searches up to 30 days ahead):
+- Next rise time for a planet, comet, asteroid, named DSO, or bundled satellite (by name or NORAD catalog number):
 
-`voidwatch --next {{mars}}`
+`voidwatch --next {{ISS}}`
 
 - Annual almanac for a year — eclipses, conjunctions, Moon close passes, shower peaks, equinoxes/solstices:
 

@@ -212,6 +212,7 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   t         toggle planet trails (lowercase)
   T         toggle track mode (uppercase — cursor follows nearest body)
   c         toggle object cursor (then hjkl, Esc to exit)
+  click     move cursor to clicked cell + arm track on nearest body
 ```
 
 ---
@@ -333,55 +334,84 @@ make
 
 ## Status
 
-**v1.0.0 — feature-complete release.** Everything below is shipped:
+**Done.** Everything below is shipped, tested, and pushed to both
+[Codeberg](https://codeberg.org/cdubz/voidwatch) and
+[GitHub](https://github.com/cd4u2b0z/voidwatch).
 
 - **Sandbox mode** — N-body simulation with phosphorescent trails,
   Perlin nebulae, particle FX (5 kinds), audio-reactive supernovae,
   three exotic body kinds (neutron star, black hole, nebula core).
 - **Astro mode** — real ephemeris with two perspectives (`m`):
   - **Geocentric**: 8870 stars (HYG v3.6.1), 88 IAU constellations
-    (Stellarium), Sun + Moon + 8 planets (Meeus), Milky Way band,
-    refraction + airmass extinction + twilight tint, sporadic meteors
-    (~8/hr) + 9 named showers with per-shower colour & velocity,
-    solar/lunar eclipses with live magnitude, planet-planet
-    conjunctions, Moon-planet close passes, 30 named DSOs (M31, M42,
-    M45, M57, Pleiades, Omega Centauri, etc.), aurora with Kp gating
-    and substorm flares.
+    (Stellarium), Sun + Moon + 8 planets (Meeus + Standish), Milky
+    Way band, Bennett refraction + Kasten-Young airmass extinction
+    + twilight tint, sporadic meteors (~8/hr) + 9 named showers with
+    per-shower colour & velocity, solar/lunar eclipses with live
+    magnitude, planet-planet conjunctions, Moon-planet close passes,
+    30 named DSOs (M31, M42, M45, M57, Pleiades, Omega Centauri, …),
+    aurora with Kp gating and substorm flares.
   - **Heliocentric**: top-down solar system. Sun-centred, all 8 planets
     + Earth + 6 comets + 5 asteroids, full orbital traces, sqrt-scaled
     distances, decorative parallax backdrop, helio-specific scan
     readout (heliocentric distance + orbital period).
-- **Near-Earth satellites** — hand-built SGP4 propagator (Hoots-Roehrich
-  1980 / Vallado 2006), validated to ~7 nm position agreement against
-  the published `tcppver.out` test vectors. Bundled near-Earth catalog
-  (ISS, Hubble, NOAA 19, Tiangong/CSS) with TLE-age policy: dim past
-  7 days, hidden past 14, refused past 30. JSON output exposes age +
-  stale flag. Deep-space SDP4 is intentionally deferred (refused
-  cleanly with a status code, no silent wrong answers for GEO/Molniya).
-- **HUD event log** — narrates shower activity, eclipse begin/peak/end,
-  conjunctions, Moon close passes on transition.
+  - **Brightness compensation** across time-scrub speed: `bright_boost`
+    scales per-frame intensity inversely with `fb_decay` so steady-
+    state bloom stays consistent from 1× through ≥1000× scrub.
+- **Near-Earth satellites** — hand-built SGP4 (Hoots-Roehrich 1980 /
+  Vallado 2006), validated to ~7 nm position agreement against the
+  published `tcppver.out` test vectors. Bundled catalog: ISS, HST,
+  NOAA 19, Tiangong/CSS. TLE-age policy: dim past 7 d, hidden past
+  14 d, refused past 30 d. JSON exposes age + stale flag. Cursor
+  pick + track + name/alias/catalog search; `/iss` resolves and
+  auto-jumps to the next AOS. `--update-tle` opt-in refresh from
+  CelesTrak (rate-limited 2 h, writes user cache, atomic rename,
+  bundled stays as offline-first fallback). Deep-space SDP4 refused
+  cleanly with `SAT_DEEP_SPACE` — no silent wrong answers for
+  GEO/Molniya.
+- **HUD event log** — narrates shower activity, eclipse begin/peak/
+  end, conjunctions, Moon close passes on transition.
 - **Headless modes** — `--tonight`, `--print-state [--json]`,
-  `--next <body>`, `--year <year>` (full annual almanac), `--snapshot`,
-  `--validate` (9/9 against Meeus's published worked examples + JPL
-  Horizons cross-checks for inner and outer planets).
+  `--next <body>` (planets/comets/asteroids/satellites), `--year`
+  (full annual almanac), `--snapshot`, `--validate` (9/9 against
+  Meeus's published worked examples + JPL Horizons cross-checks for
+  Mercury/Mars/Jupiter/Saturn at J2000.0), `--update-tle`.
 - **Interactive controls** — time scrub (`+`/`-`/`,`/`.`/`0`), event
-  jump (`j`), search & auto-track (`/`), track mode (`T`), cursor pick
-  (`c` + hjkl), 8 toggle keys for grid/lines/DSOs/aurora/trails/
-  backdrop/perspectives.
+  jump (`j`), in-program search with auto-track (`/`), track mode
+  (`T`), cursor pick (`c` + hjkl, or mouse-click), 9 toggle keys
+  (grid/lines/DSOs/aurora/satellites/trails/star-backdrop/
+  geo-helio/cursor).
 - **Configuration** — runtime TOML knobs (`~/.config/voidwatch/config.toml`),
   wallust-driven theming (`~/.config/voidwatch/theme.conf`), location
   resolution (`--lat/--lon` → file → env → fallback), `--at <iso-date>`
   for arbitrary virtual time.
+- **Tests** — 9 binaries via `make test`: framebuffer math, projection
+  round-trip (machine-epsilon), JSON regression vs. golden, n-body
+  symplectic-Euler conservation, TLE parser (12 cases), SGP4 init
+  (7 cases), SGP4 propagation against Vallado vectors (7-nm
+  agreement), satellite look-angle synthetic geometry, satellite
+  bundle smoke. All green.
+- **Maintainer tooling** — `tools/gen_skydata.py` (HYG + Stellarium
+  → `src/skydata.c`), `tools/gen_satellites.py` (CelesTrak →
+  `src/satdata.c`). End users build with no Python and no network.
+- **Documentation** — [`ARCHITECTURE.md`](ARCHITECTURE.md) (build
+  journey + design rationale), [`ASTRONOMY.md`](ASTRONOMY.md) (per-
+  algorithm citations + `--validate` test table),
+  [`CITATIONS.md`](CITATIONS.md) (data-source credits),
+  [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) (per-component
+  obligations), [`docs/voidwatch.1`](docs/voidwatch.1) (man page,
+  `man -l` renderable), [`docs/voidwatch.page.md`](docs/voidwatch.page.md)
+  (tldr-pages style).
 
-Open (low priority polish): lunar standstills, eclipse path-of-totality,
-inotify hot-reload, audio reactivity in astro, GeoNames cities.
+Open low-priority polish (none of these is missed in normal use):
+lunar standstills, eclipse path-of-totality, inotify hot-reload of
+runtime config, audio reactivity in astro mode, GeoNames `--city`
+shorthand, expand `--validate` to comets/asteroids.
 
-Deferred indefinitely: deep-space SDP4 (every voidwatch satellite
-target is near-Earth; refusing GEO/Molniya cleanly is the right call).
-
-Sources are fully cited in [CITATIONS.md](CITATIONS.md). Algorithm
-references are in [ASTRONOMY.md](ASTRONOMY.md). Architecture and
-design rationale are in [ARCHITECTURE.md](ARCHITECTURE.md).
+Permanently deferred with documented reasons: VSOP87 (Meeus's
+arcminute precision is already invisible at terminal cell scale),
+deep-space SDP4 (every voidwatch satellite target is near-Earth;
+refusing GEO/Molniya cleanly is the right call), runtime data engine
+(would make voidwatch a worse Stellarium).
 
 ---
 
