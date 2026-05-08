@@ -579,3 +579,176 @@ SatelliteStatus satellite_model_init(const SatelliteTLE *tle,
     sat->error = 0;
     return SAT_OK;
 }
+
+/* ---- Phase 3: near-Earth SGP4 propagation ---------------------------
+ *
+ * Mirrors Vallado/NASA SGP4.c `sgp4` for the near-Earth path. Variable
+ * names follow the reference exactly so the line-by-line correspondence
+ * stays grep-able when validating against tcppver.out vectors.
+ *
+ * Output is in TEME (True Equator Mean Equinox) ECI: r in km, v in km/s.
+ * That frame is *not* J2000 / ICRF / what voidwatch's planet path uses —
+ * Phase 5 converts TEME → ECEF → topocentric look angles for rendering.
+ *
+ * Deep-space (period ≥ 225 min) is refused with SAT_DEEP_SPACE until
+ * Phase 4 lands dscom/dpper/dsinit/dspace.
+ */
+SatelliteStatus satellite_propagate_teme(const SatelliteModel *sat,
+                                         double tsince,
+                                         double r_km[3],
+                                         double v_km_s[3]) {
+    if (!sat || !r_km || !v_km_s) return SAT_BAD_FIELD;
+    if (sat->deep_space)          return SAT_DEEP_SPACE;
+
+    const double x2o3      = 2.0 / 3.0;
+    const double vkmpersec = WGS72_RAD_KM * WGS72_XKE / 60.0;
+
+    /* ---- Secular updates over time ---- */
+    double xmdf   = sat->mo    + sat->mdot    * tsince;
+    double argpdf = sat->argpo + sat->argpdot * tsince;
+    double nodedf = sat->nodeo + sat->nodedot * tsince;
+    double argpm  = argpdf;
+    double mm     = xmdf;
+    double t2     = tsince * tsince;
+    double nodem  = nodedf + sat->nodecf * t2;
+    double tempa  = 1.0 - sat->cc1 * tsince;
+    double tempe  = sat->bstar * sat->cc4 * tsince;
+    double templ  = sat->t2cof * t2;
+
+    /* ---- Full near-Earth drag (only when perigee >= 220 km) ---- */
+    if (!sat->isimp) {
+        double delomg   = sat->omgcof * tsince;
+        double delmtemp = 1.0 + sat->eta * cos(xmdf);
+        double delm     = sat->xmcof
+                        * (delmtemp * delmtemp * delmtemp - sat->delmo);
+        double temp_mm  = delomg + delm;
+        mm    = xmdf   + temp_mm;
+        argpm = argpdf - temp_mm;
+        double t3 = t2 * tsince;
+        double t4 = t3 * tsince;
+        tempa = tempa - sat->d2 * t2 - sat->d3 * t3 - sat->d4 * t4;
+        tempe = tempe + sat->bstar * sat->cc5 * (sin(mm) - sat->sinmao);
+        templ = templ + sat->t3cof * t3
+                      + t4 * (sat->t4cof + tsince * sat->t5cof);
+    }
+
+    double nm    = sat->no_unkozai;
+    double em    = sat->ecco;
+    double inclm = sat->inclo;
+
+    /* (skip dspace — deep-space refused at the top) */
+
+    if (nm <= 0.0) return SAT_PROP_ERROR;
+
+    double am = pow(WGS72_XKE / nm, x2o3) * tempa * tempa;
+    nm        = WGS72_XKE / pow(am, 1.5);
+    em        = em - tempe;
+
+    /* Eccentricity sanity. Vallado's exact tolerance — em can drift
+     * slightly negative under aggressive drag, which is physically
+     * meaningless but numerically tolerable to -0.001. */
+    if (em >= 1.0 || em < -0.001) return SAT_PROP_ERROR;
+    if (em < 1.0e-6) em = 1.0e-6;       /* clamp away from singular */
+
+    mm += sat->no_unkozai * templ;
+    double xlm = mm + argpm + nodem;
+
+    /* Wrap angles to [0, 2π). */
+    nodem = fmod(nodem, TWOPI); if (nodem < 0.0) nodem += TWOPI;
+    argpm = fmod(argpm, TWOPI); if (argpm < 0.0) argpm += TWOPI;
+    xlm   = fmod(xlm,   TWOPI); if (xlm   < 0.0) xlm   += TWOPI;
+    mm    = fmod(xlm - argpm - nodem, TWOPI);
+    if (mm < 0.0) mm += TWOPI;
+
+    double sinim = sin(inclm);
+    double cosim = cos(inclm);
+
+    /* Lunar-solar periodics (dpper) skipped — deep-space only. */
+    double ep    = em;
+    double xincp = inclm;
+    double argpp = argpm;
+    double nodep = nodem;
+    double mp    = mm;
+    double sinip = sinim;
+    double cosip = cosim;
+
+    /* ---- Long-period periodics setup ---- */
+    double axnl = ep * cos(argpp);
+    double temp = 1.0 / (am * (1.0 - ep * ep));
+    double aynl = ep * sin(argpp) + temp * sat->aycof;
+    double xl   = mp + argpp + nodep + temp * sat->xlcof * axnl;
+
+    /* ---- Solve Kepler's equation (Newton, capped at 10 iters) ---- */
+    double u   = fmod(xl - nodep, TWOPI); if (u < 0.0) u += TWOPI;
+    double eo1 = u;
+    double tem5 = 9999.9;
+    double sineo1 = 0.0, coseo1 = 0.0;
+    for (int ktr = 1; ktr <= 10 && fabs(tem5) >= 1.0e-12; ktr++) {
+        sineo1 = sin(eo1);
+        coseo1 = cos(eo1);
+        tem5 = 1.0 - coseo1 * axnl - sineo1 * aynl;
+        tem5 = (u - aynl * coseo1 + axnl * sineo1 - eo1) / tem5;
+        if (fabs(tem5) >= 0.95) tem5 = (tem5 > 0.0) ? 0.95 : -0.95;
+        eo1 += tem5;
+    }
+
+    /* ---- Short-period preliminaries ---- */
+    double ecose = axnl * coseo1 + aynl * sineo1;
+    double esine = axnl * sineo1 - aynl * coseo1;
+    double el2   = axnl * axnl + aynl * aynl;
+    double pl    = am * (1.0 - el2);
+    if (pl < 0.0) return SAT_PROP_ERROR;
+
+    double rl     = am * (1.0 - ecose);
+    double rdotl  = sqrt(am) * esine / rl;
+    double rvdotl = sqrt(pl) / rl;
+    double betal  = sqrt(1.0 - el2);
+    temp = esine / (1.0 + betal);
+    double sinu = am / rl * (sineo1 - aynl - axnl * temp);
+    double cosu = am / rl * (coseo1 - axnl + aynl * temp);
+    double su   = atan2(sinu, cosu);
+    double sin2u = 2.0 * cosu * sinu;
+    double cos2u = 1.0 - 2.0 * sinu * sinu;
+    temp = 1.0 / pl;
+    double temp1 = 0.5 * WGS72_J2 * temp;
+    double temp2 = temp1 * temp;
+
+    /* ---- Short-period periodic corrections ---- */
+    double mrt   = rl * (1.0 - 1.5 * temp2 * betal * sat->con41)
+                 + 0.5 * temp1 * sat->x1mth2 * cos2u;
+    su          -= 0.25 * temp2 * sat->x7thm1 * sin2u;
+    double xnode = nodep + 1.5 * temp2 * cosip * sin2u;
+    double xinc  = xincp + 1.5 * temp2 * cosip * sinip * cos2u;
+    double mvt   = rdotl - nm * temp1 * sat->x1mth2 * sin2u / WGS72_XKE;
+    double rvdot = rvdotl + nm * temp1
+                 * (sat->x1mth2 * cos2u + 1.5 * sat->con41) / WGS72_XKE;
+
+    /* ---- Orientation vectors (perifocal → TEME) ---- */
+    double sinsu = sin(su);
+    double cossu = cos(su);
+    double snod  = sin(xnode);
+    double cnod  = cos(xnode);
+    double sini  = sin(xinc);
+    double cosi  = cos(xinc);
+    double xmx = -snod * cosi;
+    double xmy =  cnod * cosi;
+    double ux = xmx * sinsu + cnod * cossu;
+    double uy = xmy * sinsu + snod * cossu;
+    double uz = sini * sinsu;
+    double vx = xmx * cossu - cnod * sinsu;
+    double vy = xmy * cossu - snod * sinsu;
+    double vz = sini * cossu;
+
+    /* ---- Position (km) and velocity (km/s) in TEME ---- */
+    r_km[0]   = mrt * ux * WGS72_RAD_KM;
+    r_km[1]   = mrt * uy * WGS72_RAD_KM;
+    r_km[2]   = mrt * uz * WGS72_RAD_KM;
+    v_km_s[0] = (mvt * ux + rvdot * vx) * vkmpersec;
+    v_km_s[1] = (mvt * uy + rvdot * vy) * vkmpersec;
+    v_km_s[2] = (mvt * uz + rvdot * vz) * vkmpersec;
+
+    /* mrt < 1 ER means the satellite has decayed below the Earth's
+     * surface during this propagation step. */
+    if (mrt < 1.0) return SAT_PROP_ERROR;
+    return SAT_OK;
+}

@@ -74,6 +74,9 @@ tests/test_tle: tests/test_tle.c src/satellite.o
 tests/test_sgp4: tests/test_sgp4.c src/satellite.o
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
+tests/test_sgp4_propagation: tests/test_sgp4_propagation.c src/satellite.o
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
 test: $(TEST_BINS) $(BIN)
 	@set -e; \
 	pass=0; fail=0; \

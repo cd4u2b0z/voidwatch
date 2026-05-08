@@ -13,4 +13,5 @@ tests/test_nbody
 tests/test_json
 tests/test_tle
 tests/test_sgp4
+tests/test_sgp4_propagation
 tests/golden/.actual.json
