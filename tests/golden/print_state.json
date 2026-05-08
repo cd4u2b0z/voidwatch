@@ -27,5 +27,11 @@
     {"name": "3 Juno", "ra_h": 1.9360, "dec_deg": 5.3439, "alt_deg": 62.6103, "az_deg": 176.8512, "mag": 9.232, "dist_au": 2.9891, "r_helio_au": 2.0180},
     {"name": "7 Iris", "ra_h": 18.7548, "dec_deg": -23.0242, "alt_deg": -25.3530, "az_deg": 257.8702, "mag": 9.683, "dist_au": 2.4530, "r_helio_au": 2.7854}
   ],
+  "satellites": [
+    {"name": "ISS (ZARYA)", "catalog_number": 25544, "valid": false, "above_horizon": false, "alt_deg": 0.0000, "az_deg": 0.0000, "range_km": 0.000, "range_rate_km_s": 0.0000, "tle_age_days": -759.4494, "stale": true},
+    {"name": "HST", "catalog_number": 20580, "valid": false, "above_horizon": false, "alt_deg": 0.0000, "az_deg": 0.0000, "range_km": 0.000, "range_rate_km_s": 0.0000, "tle_age_days": -759.2267, "stale": true},
+    {"name": "NOAA 19", "catalog_number": 33591, "valid": false, "above_horizon": false, "alt_deg": 0.0000, "az_deg": 0.0000, "range_km": 0.000, "range_rate_km_s": 0.0000, "tle_age_days": -759.5177, "stale": true},
+    {"name": "CSS (TIANHE)", "catalog_number": 48274, "valid": false, "above_horizon": false, "alt_deg": 0.0000, "az_deg": 0.0000, "range_km": 0.000, "range_rate_km_s": 0.0000, "tle_age_days": -759.4867, "stale": true}
+  ],
   "active_shower": null
 }

@@ -142,6 +142,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    l        toggle constellation lines",
         "    d        toggle deep-sky objects",
         "    a        toggle aurora",
+        "    i        toggle satellites (ISS, HST, NOAA 19, CSS)",
         "    t        toggle planet trails",
         "    T        toggle track mode (cursor follows nearest body)",
         "    m        toggle geo / helio view",

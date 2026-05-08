@@ -941,3 +941,128 @@ SatelliteStatus satellite_state_compute(const SatelliteModel *sat,
                                         obs_lat_rad, obs_lon_east_rad,
                                         obs_alt_km, out);
 }
+
+/* ---- Phase 6: bundled catalog ----------------------------------------
+ *
+ * TLEs fetched from CelesTrak on 2026-05-08. Treat as demo seed data —
+ * TLEs age fast, especially for LEO. Refresh by re-fetching from
+ * https://celestrak.org/NORAD/elements/gp.php?CATNR=<n>&FORMAT=TLE
+ * when this file is older than ~14 days.
+ *
+ * Every entry must be near-Earth (period < 225 min) — deep-space SDP4
+ * is deferred. The init pass below verifies this and refuses entries
+ * that would silently fall back.
+ */
+
+const SatelliteElements satellite_elements[SATELLITE_COUNT] = {
+    /* International Space Station — the canonical visible-pass target */
+    {
+        .name    = "ISS (ZARYA)",
+        .line1   = "1 25544U 98067A   26128.19937109  .00004920  00000+0  96926-4 0  9998",
+        .line2   = "2 25544  51.6308 138.0417 0007476  35.9089 324.2400 15.49139257565554",
+        .aliases = "iss,zarya,25544",
+        .catalog = 25544,
+    },
+    /* Hubble Space Telescope */
+    {
+        .name    = "HST",
+        .line1   = "1 20580U 90037B   26127.97667409  .00005999  00000+0  19110-3 0  9996",
+        .line2   = "2 20580  28.4762 355.2958 0002157  58.4789 301.6018 15.30319964782400",
+        .aliases = "hst,hubble,20580",
+        .catalog = 20580,
+    },
+    /* NOAA 19 — polar weather satellite, reliable LEO sun-synchronous */
+    {
+        .name    = "NOAA 19",
+        .line1   = "1 33591U 09005A   26128.26774666  .00000018  00000+0  33300-4 0  9999",
+        .line2   = "2 33591  98.9529 199.1109 0014524 140.2237 220.0003 14.13467775888848",
+        .aliases = "noaa,noaa19,noaa-19,33591",
+        .catalog = 33591,
+    },
+    /* CSS Tianhe — Chinese space station core module */
+    {
+        .name    = "CSS (TIANHE)",
+        .line1   = "1 48274U 21035A   26128.23670278  .00021140  00000+0  22512-3 0  9992",
+        .line2   = "2 48274  41.4663 205.0585 0004840 355.4513   4.6282 15.63470026286921",
+        .aliases = "css,tianhe,tiangong,48274",
+        .catalog = 48274,
+    },
+};
+const int satellite_count = SATELLITE_COUNT;
+
+/* Cached models. Populated lazily on first satellite_compute_all call;
+ * `cache_status[i]` is the init result so we don't retry every frame. */
+static SatelliteModel sat_cache_models[SATELLITE_COUNT];
+static SatelliteStatus sat_cache_status[SATELLITE_COUNT];
+static int sat_cache_initialized = 0;
+
+static void cache_init_once(void) {
+    if (sat_cache_initialized) return;
+    for (int i = 0; i < SATELLITE_COUNT; i++) {
+        const SatelliteElements *e = &satellite_elements[i];
+        SatelliteTLE tle;
+        SatelliteStatus rc = satellite_tle_parse(e->name, e->line1, e->line2,
+                                                 &tle);
+        if (rc != SAT_OK) { sat_cache_status[i] = rc; continue; }
+        rc = satellite_model_init(&tle, &sat_cache_models[i]);
+        if (rc == SAT_OK && sat_cache_models[i].deep_space) {
+            /* Bundled catalog must be near-Earth only. */
+            sat_cache_status[i] = SAT_DEEP_SPACE;
+        } else {
+            sat_cache_status[i] = rc;
+        }
+    }
+    sat_cache_initialized = 1;
+}
+
+/* Stale-TLE policy gates. Anything more than MAX_AGE_DAYS old is not
+ * propagated at all; rendering and labels handle the dim/hide windows
+ * higher up the stack so this layer just refuses extreme staleness. */
+#define SAT_MAX_AGE_DAYS 30.0
+
+SatelliteStatus satellite_compute_all(double jd_ut1,
+                                      double obs_lat_rad,
+                                      double obs_lon_east_rad,
+                                      double obs_alt_km,
+                                      SatelliteState out[SATELLITE_COUNT]) {
+    if (!out) return SAT_BAD_FIELD;
+    cache_init_once();
+
+    for (int i = 0; i < SATELLITE_COUNT; i++) {
+        SatelliteState *s = &out[i];
+        memset(s, 0, sizeof *s);
+        if (sat_cache_status[i] != SAT_OK) continue;
+
+        const SatelliteModel *m = &sat_cache_models[i];
+        double age = jd_ut1 - m->jdsatepoch;
+        if (fabs(age) > SAT_MAX_AGE_DAYS) continue;     /* refuse to propagate */
+
+        double tsince = age * 1440.0;
+        SatelliteStatus rc = satellite_state_compute(
+            m, tsince, obs_lat_rad, obs_lon_east_rad, obs_alt_km, s);
+        if (rc != SAT_OK) {
+            memset(s, 0, sizeof *s);    /* re-zero in case partial fill */
+        }
+    }
+    return SAT_OK;
+}
+
+double satellite_epoch_jd(int idx) {
+    cache_init_once();
+    if (idx < 0 || idx >= SATELLITE_COUNT) return 0.0;
+    if (sat_cache_status[idx] != SAT_OK)   return 0.0;
+    return sat_cache_models[idx].jdsatepoch;
+}
+
+const char *satellite_short_name(int idx) {
+    if (idx < 0 || idx >= SATELLITE_COUNT) return "?";
+    /* Hand-curated short forms for HUD labels. Keep <= 5 chars to
+     * sit alongside planet labels (MER/VEN/MAR style). */
+    static const char *shorts[SATELLITE_COUNT] = {
+        "ISS",    /* ISS (ZARYA) */
+        "HST",    /* HST          */
+        "NOAA",   /* NOAA 19      */
+        "CSS",    /* CSS (TIANHE) */
+    };
+    return shorts[idx];
+}

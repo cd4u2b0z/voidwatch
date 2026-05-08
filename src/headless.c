@@ -14,6 +14,7 @@
 #include "headless.h"
 #include "palette.h"
 #include "render.h"
+#include "satellite.h"
 #include "vwconfig.h"
 
 #ifndef M_PI
@@ -430,6 +431,34 @@ int headless_print_state(const Observer *obs, time_t now, FILE *out, int json) {
                 tmp.az_rad  * RAD2DEG,
                 asts[i].mag, asts[i].dist_au, asts[i].r_helio_au,
                 (i == ASTEROID_COUNT - 1) ? "" : ",");
+    }
+    fprintf(out, "  ],\n");
+
+    /* Satellite block (Phase 6 bundled set). Each entry includes TLE
+     * age + a stale flag so callers don't trust positions silently. */
+    SatelliteState sats[SATELLITE_COUNT];
+    satellite_compute_all(jd, obs->lat_rad, obs->lon_rad, 0.0, sats);
+    fprintf(out, "  \"satellites\": [\n");
+    for (int i = 0; i < SATELLITE_COUNT; i++) {
+        const SatelliteState *s = &sats[i];
+        double epoch_jd = satellite_epoch_jd(i);
+        double age_days = (epoch_jd > 0.0) ? (jd - epoch_jd) : 0.0;
+        int stale = (epoch_jd > 0.0 && fabs(age_days) > 7.0) ? 1 : 0;
+        fprintf(out,
+                "    {\"name\": \"%s\", \"catalog_number\": %d, "
+                "\"valid\": %s, \"above_horizon\": %s, "
+                "\"alt_deg\": %.4f, \"az_deg\": %.4f, "
+                "\"range_km\": %.3f, \"range_rate_km_s\": %.4f, "
+                "\"tle_age_days\": %.4f, \"stale\": %s}%s\n",
+                satellite_elements[i].name,
+                satellite_elements[i].catalog,
+                s->valid ? "true" : "false",
+                s->above_horizon ? "true" : "false",
+                s->alt_rad * RAD2DEG, s->az_rad * RAD2DEG,
+                s->range_km, s->range_rate_km_s,
+                age_days,
+                stale ? "true" : "false",
+                (i == SATELLITE_COUNT - 1) ? "" : ",");
     }
     fprintf(out, "  ],\n");
 
@@ -876,6 +905,7 @@ int headless_snapshot(const Observer *obs, time_t now,
     astro.show_dso           = 1;
     astro.show_constellations = 0;
     astro.show_star_backdrop = 0;     /* clean astronomical view by default */
+    astro.show_satellites    = 1;     /* bundled sats included in snapshots */
 
     astro_update(&astro, now);
 

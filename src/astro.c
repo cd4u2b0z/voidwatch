@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "astro.h"
@@ -101,6 +102,13 @@ void astro_update(AstroState *st, time_t now) {
         st->asteroids[i].alt_rad = tmp.alt_rad;
         st->asteroids[i].az_rad  = tmp.az_rad;
     }
+
+    /* Bundled satellites (Phase 6). The cache inside satellite.c
+     * handles parse/init lazily and refuses entries older than 30
+     * days. Observer altitude is 0 km (Observer doesn't carry it). */
+    satellite_compute_all(st->jd,
+                          st->observer.lat_rad, st->observer.lon_rad,
+                          0.0, st->satellites);
 
     trails_capture(st);
 }
@@ -929,6 +937,64 @@ static void asteroids_draw(const AstroState *st, Framebuffer *fb) {
     }
 }
 
+/* === Phase 6: satellites ============================================ *
+ *
+ * Bundled near-Earth satellites stamped as sharp single-pixel points with
+ * a tight bloom. fb_max instead of fb_add — ISS at orbital speed crosses
+ * the horizon-to-zenith arc in ~3 minutes, so any decay-trail effect
+ * smears into an unreadable streak. Better to draw fresh each frame and
+ * let the eye track the motion.
+ *
+ * Staleness gating (PHASE6_SATELLITE_INTEGRATION.md):
+ *   age <= 7 d   normal brightness
+ *   7 < age <= 14 d  half-dim
+ *   age > 14 d   hidden (compute path already gates >30 d entirely)
+ */
+static void satellites_draw(const AstroState *st, Framebuffer *fb) {
+    if (!st->show_satellites) return;
+    Color tint_base = { 0.78f, 0.92f, 1.00f };    /* cool white-cyan */
+    for (int i = 0; i < SATELLITE_COUNT; i++) {
+        const SatelliteState *s = &st->satellites[i];
+        if (!s->valid || !s->above_horizon) continue;
+
+        double age = fabs(st->jd - satellite_epoch_jd(i));
+        if (age > 14.0) continue;                  /* hide stale       */
+        float age_dim = (age > 7.0) ? 0.5f : 1.0f;
+
+        float sx, sy;
+        if (project(fb->sub_w, fb->sub_h, s->alt_rad, s->az_rad, &sx, &sy) != 0)
+            continue;
+
+        float intensity = 1.05f * age_dim;
+        Color tint = tint_base;
+        apply_extinction(s->alt_rad, &tint, &intensity);
+
+        /* Tight Gaussian — sigma 0.7 produces a sub-pixel core with a
+         * 1-cell halo, distinct from the wider planet/asteroid stamps. */
+        float sigma = 0.7f;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 2.5f;
+        int x0 = (int)floorf(sx - box);
+        int x1 = (int)ceilf (sx + box);
+        int y0 = (int)floorf(sy - box);
+        int y1 = (int)ceilf (sy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float dy = (float)y - sy;
+            for (int x = x0; x <= x1; x++) {
+                float dx = (float)x - sx;
+                float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                float k = t * intensity;
+                if (k < 0.02f) continue;
+                fb_max(fb, x, y, tint.r * k, tint.g * k, tint.b * k);
+            }
+        }
+    }
+}
+
 /* === Tier 5b: deep-sky objects ====================================== *
  *
  * Bundled Messier + bright NGC catalogue from `dso.{h,c}`. Each entry is
@@ -1667,6 +1733,29 @@ static int strieq_local(const char *a, const char *b) {
     return *a == 0 && *b == 0;
 }
 
+/* Case-insensitive equal against any token in a comma-separated list.
+ * Used for satellite aliases like "iss,zarya,25544". */
+static int alias_match_local(const char *aliases, const char *name) {
+    if (!aliases || !*name) return 0;
+    size_t need = strlen(name);
+    const char *p = aliases;
+    while (*p) {
+        const char *q = p;
+        while (*q && *q != ',') q++;
+        size_t len = (size_t)(q - p);
+        if (len == need) {
+            int eq = 1;
+            for (size_t i = 0; i < len; i++) {
+                if (tolower((unsigned char)p[i]) !=
+                    tolower((unsigned char)name[i])) { eq = 0; break; }
+            }
+            if (eq) return 1;
+        }
+        p = (*q == ',') ? q + 1 : q;
+    }
+    return 0;
+}
+
 /* Case-insensitive substring match. Used for DSO names so the user
  * can type `m31` or `andromeda` and match "M31 Andromeda". */
 static int stristr_local(const char *haystack, const char *needle) {
@@ -1769,7 +1858,31 @@ int astro_search_body(const AstroState *st, const char *name,
             }
         }
     }
+    /* Satellites — exact-match name OR comma-separated alias / catalog. */
+    if (kind == 0) {
+        for (int i = 0; i < SATELLITE_COUNT; i++) {
+            const SatelliteElements *e = &satellite_elements[i];
+            if (strieq_local(e->name, name)
+             || strieq_local(satellite_short_name(i), name)
+             || alias_match_local(e->aliases, name)) {
+                kind = 5; idx = i; display = e->name; break;
+            }
+        }
+    }
     if (kind == 0) return -1;
+
+    /* Satellites short-circuit the rise-search: return immediately with
+     * a zero scrub. The caller arms track, and the cursor will follow
+     * the satellite while it's above the horizon. Implementing a proper
+     * pass predictor (10-30s coarse step + AOS/LOS bisection) is on
+     * the roadmap but isn't a Phase 6 acceptance gate. */
+    if (kind == 5) {
+        if (display && display_out) snprintf(display_out, cap, "%s", display);
+        if (out_kind) *out_kind = kind;
+        if (out_idx)  *out_idx  = idx;
+        if (out_seconds) *out_seconds = 0.0;
+        return 0;
+    }
 
     if (display && display_out) {
         snprintf(display_out, cap, "%s", display);
@@ -2265,6 +2378,10 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
     /* Asteroids — dim, neutral, no tail. Same composite slot. */
     asteroids_draw(st, fb);
 
+    /* Satellites — sharp cool-white points, fb_max so fast motion
+     * doesn't smear. Drawn after slow targets so they sit on top. */
+    satellites_draw(st, fb);
+
     /* Meteors above everything else — they're the brightest, fastest
      * thing in the sky when active. */
     meteors_step(st, fb);
@@ -2286,6 +2403,8 @@ typedef enum {
     PICK_PLANET,
     PICK_COMET,
     PICK_ASTEROID,
+    PICK_DSO       = 4,    /* search-only, used by track_cell_for */
+    PICK_SATELLITE = 5,    /* bundled near-Earth satellites        */
 } PickKind;
 
 typedef struct {
@@ -2329,6 +2448,21 @@ static CursorPick find_nearest_target(const AstroState *st, int cols, int rows,
                             st->asteroids[i].az_rad, col, row);
         if (d2 < best_d2) { best_d2 = d2; best.kind = PICK_ASTEROID; best.idx = i; }
     }
+    /* Satellites — only when the overlay is on, only when above
+     * horizon. Stale gating mirrors the render path. */
+    if (st->show_satellites) {
+        for (int i = 0; i < SATELLITE_COUNT; i++) {
+            const SatelliteState *s = &st->satellites[i];
+            if (!s->valid || !s->above_horizon) continue;
+            double age = fabs(st->jd - satellite_epoch_jd(i));
+            if (age > 14.0) continue;
+            double d2 = pick_d2(sub_w, sub_h, s->alt_rad, s->az_rad,
+                                col, row);
+            if (d2 < best_d2) {
+                best_d2 = d2; best.kind = PICK_SATELLITE; best.idx = i;
+            }
+        }
+    }
     return best;
 }
 
@@ -2351,12 +2485,17 @@ static int track_cell_for(const AstroState *st, int cols, int rows,
     } else if (kind == PICK_ASTEROID && idx >= 0 && idx < ASTEROID_COUNT) {
         alt = st->asteroids[idx].alt_rad;
         az  = st->asteroids[idx].az_rad;
-    } else if (kind == 4 /* DSO */ && idx >= 0 && idx < dso_count) {
+    } else if (kind == PICK_DSO && idx >= 0 && idx < dso_count) {
         /* Recompute from fixed J2000 RA/Dec + current LST. */
         double lst_rad = st->lst_hours * (M_PI / 12.0);
         double ra  = dso_catalog[idx].ra_h * (M_PI / 12.0);
         double dec = dso_catalog[idx].dec_deg * DEG2RAD;
         radec_to_altaz(ra, dec, st->observer.lat_rad, lst_rad, &alt, &az);
+    } else if (kind == PICK_SATELLITE && idx >= 0 && idx < SATELLITE_COUNT) {
+        const SatelliteState *s = &st->satellites[idx];
+        if (!s->valid || !s->above_horizon) return -1;
+        alt = s->alt_rad;
+        az  = s->az_rad;
     } else {
         return -1;
     }
@@ -2496,6 +2635,38 @@ void astro_labels(const AstroState *st, FILE *out, int cols, int rows) {
                 p_byte(g_palette.hud.g * k),
                 p_byte(g_palette.hud.b * k));
         fprintf(out, "\x1b[%d;%dH%s", cy, cx, ephem_short((EphemBody)i));
+    }
+
+    /* Satellite labels — compact 3-4 char names next to each visible
+     * non-stale satellite. Shares the planet-label corner-reservation
+     * rules so HUD widgets aren't trampled. Hidden when the overlay
+     * is toggled off. */
+    if (st->show_satellites) {
+        for (int i = 0; i < SATELLITE_COUNT; i++) {
+            const SatelliteState *s = &st->satellites[i];
+            if (!s->valid || !s->above_horizon) continue;
+            double age = fabs(st->jd - satellite_epoch_jd(i));
+            if (age > 14.0) continue;
+
+            float sx, sy;
+            if (project(cols * 2, rows * 4, s->alt_rad, s->az_rad, &sx, &sy) != 0)
+                continue;
+            int cx = (int)(sx / 2.0f) + 2;
+            int cy = (int)(sy / 4.0f);
+            if (cx < 1 || cy < 1 || cx >= cols - 6 || cy >= rows - 1) continue;
+            if (cy <= 1 && cx >= cols - 28)             continue;
+            if (cy >= rows - 5 && cx >= cols - 16)      continue;
+
+            /* Fade by altitude like planets, plus a half-dim past 7d. */
+            float k = (float)(s->alt_rad / (M_PI * 0.5));
+            if (k < 0.5f) k = 0.5f;
+            if (age > 7.0) k *= 0.5f;
+            fprintf(out, "\x1b[38;2;%d;%d;%dm",
+                    p_byte(g_palette.hud.r * k),
+                    p_byte(g_palette.hud.g * k),
+                    p_byte(g_palette.hud.b * k));
+            fprintf(out, "\x1b[%d;%dH%s", cy, cx, satellite_short_name(i));
+        }
     }
 
     /* Cursor reticle in cursor-mode. Drawn last so it sits over labels.

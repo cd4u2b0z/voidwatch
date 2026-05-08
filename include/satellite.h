@@ -195,4 +195,48 @@ SatelliteStatus satellite_state_compute(const SatelliteModel *model,
                                         double obs_alt_km,
                                         SatelliteState *out);
 
+/* ---- Phase 6: bundled catalog --------------------------------------- */
+
+/*
+ * voidwatch ships a tiny demo set of bundled near-Earth satellites.
+ * TLEs decay quickly; expect bundled values to need a periodic refresh.
+ * The age policy in astro.c hides anything older than two weeks and
+ * refuses to propagate beyond 30 days. See PHASE6_SATELLITE_INTEGRATION.md.
+ */
+#define SATELLITE_COUNT 4
+
+typedef struct {
+    const char *name;        /* display name                              */
+    const char *line1;       /* TLE line 1, exactly 69 columns            */
+    const char *line2;       /* TLE line 2, exactly 69 columns            */
+    const char *aliases;     /* comma-separated lookup keys for search    */
+    int         catalog;     /* NORAD catalog number, for display + search */
+} SatelliteElements;
+
+extern const SatelliteElements satellite_elements[SATELLITE_COUNT];
+extern const int               satellite_count;
+
+/*
+ * Compute every bundled satellite's state for the given JD + observer.
+ * Internally caches parsed/initialised SatelliteModels — first call
+ * does the work, subsequent calls reuse. Failures (parse, deep-space,
+ * propagation error, stale TLE) leave the corresponding `out[i].valid`
+ * at zero so the render path can skip cleanly. Always returns SAT_OK
+ * — per-satellite errors are reported in the SatelliteState array.
+ */
+SatelliteStatus satellite_compute_all(double jd_ut1,
+                                      double obs_lat_rad,
+                                      double obs_lon_east_rad,
+                                      double obs_alt_km,
+                                      SatelliteState out[SATELLITE_COUNT]);
+
+/* TLE-epoch JD of bundled satellite `idx` (or 0 if idx out of range or
+ * the model failed to initialise). Used for the staleness HUD readout
+ * and headless JSON output. */
+double satellite_epoch_jd(int idx);
+
+/* Compact display name (e.g. "ISS", "HST") used in HUD labels and as
+ * search alias. Falls back to the full name if no compact form. */
+const char *satellite_short_name(int idx);
+
 #endif

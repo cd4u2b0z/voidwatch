@@ -42,6 +42,21 @@ data files, no network calls.
   of the Major Planets*** (JPL).
   Element form used by `src/ephem.c`'s `helio_xyz`.
 
+## SGP4 satellites
+
+- **Hoots & Roehrich (1980)**, "Spacetrack Report No. 3: Models for
+  Propagation of NORAD Element Sets." Original SGP4 specification.
+- **Vallado, Crawford, Hujsak, Kelso (2006)**, "Revisiting Spacetrack
+  Report #3" (AIAA 2006-6753). Modern, corrected reference. Source for
+  the equations + constants implemented in `src/satellite.c`, and for
+  the verification vectors in `tests/data/sgp4_vectors.txt` (subset of
+  Vallado's `SGP4-VER.TLE` + `tcppver.out`). https://celestrak.org/publications/AIAA/2006-6753/
+- **CelesTrak GP query API**, https://celestrak.org/NORAD/elements/gp.php
+  Source for the bundled near-Earth TLEs in `src/satellite.c`
+  (`satellite_elements[]`). Refresh cadence per CelesTrak's published
+  guidance — no aggressive polling. Format documented at
+  https://celestrak.org/NORAD/documentation/tle-fmt.php.
+
 ## Atmosphere & rendering
 
 - **Bennett (1982)**, "The calculation of astronomical refraction in

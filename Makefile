@@ -80,6 +80,9 @@ tests/test_sgp4_propagation: tests/test_sgp4_propagation.c src/satellite.o
 tests/test_satellite_look: tests/test_satellite_look.c src/satellite.o
 	$(CC) $(CFLAGS) $^ -o $@ -lm
 
+tests/test_satellite_bundle: tests/test_satellite_bundle.c src/satellite.o
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
 test: $(TEST_BINS) $(BIN)
 	@set -e; \
 	pass=0; fail=0; \

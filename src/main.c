@@ -89,7 +89,7 @@ static void print_help(const char *argv0) {
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
         "              g grid, l constellation lines, d deep-sky,\n"
         "              a aurora, t trails, m geo/helio,\n"
-        "              s star backdrop, c cursor (hjkl, Esc),\n"
+        "              s star backdrop, c cursor (hjkl, Esc), i satellites,\n"
         "              click  move cursor + arm track on a body.\n",
         argv0);
 }
@@ -287,6 +287,7 @@ int main(int argc, char **argv) {
     AstroState astro = {0};
     astro.show_star_backdrop = 1;      /* parallax backdrop on by default */
     astro.show_dso           = 1;      /* DSOs visible by default in geo */
+    astro.show_satellites    = 1;      /* bundled sat overlay on by default */
     /* astro.show_aurora stays 0 — most observers are at mid-latitudes
      * where aurora isn't visible. Press `a` to force-render. */
     if (astro_mode) {
@@ -455,6 +456,9 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && (k == 'a' || k == 'A')) {
                 astro.show_aurora = !astro.show_aurora;
+            }
+            else if (astro_mode && (k == 'i' || k == 'I')) {
+                astro.show_satellites = !astro.show_satellites;
             }
             /* Capital T toggles track mode (lowercase t is trails). */
             else if (astro_mode && k == 'T') {

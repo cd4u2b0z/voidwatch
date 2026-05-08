@@ -10,6 +10,7 @@
 #include "dso.h"
 #include "ephem.h"
 #include "framebuffer.h"
+#include "satellite.h"
 
 /*
  * Real-ephemeris mode. Composites Sun + Moon + 8 planets over the existing
@@ -76,7 +77,8 @@ typedef struct {
 
     /* Track mode. When active, the cursor follows the snapshot-tracked
      * body each frame instead of staying still while the sky rotates.
-     * `track_kind` is a small enum (0=none, 1=planet, 2=comet, 3=asteroid)
+     * `track_kind` is a small enum
+     *   0=none, 1=planet, 2=comet, 3=asteroid, 4=DSO, 5=satellite
      * — keeping it int so astro.h doesn't need to expose the PickKind
      * enum from astro.c. `track_idx` indexes the appropriate array. */
     int            track_active;
@@ -96,6 +98,12 @@ typedef struct {
 
     /* Bundled asteroids: same pattern. */
     AsteroidState  asteroids[ASTEROID_COUNT];
+
+    /* Bundled satellites (Phase 6): per-frame look angles. The static
+     * SGP4 model cache lives in src/satellite.c; this array is just the
+     * per-tick output. */
+    SatelliteState satellites[SATELLITE_COUNT];
+    int            show_satellites;       /* toggle key: i           */
 } AstroState;
 
 /* Compute every body's geocentric + topocentric position from `now`. */

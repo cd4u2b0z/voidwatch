@@ -798,6 +798,79 @@ Source: `src/headless.c` (`headless_validate`).
 
 ---
 
+## Satellites (SGP4)
+
+> Hoots & Roehrich (1980), "Spacetrack Report No. 3"; Vallado, Crawford,
+> Hujsak & Kelso (2006), "Revisiting Spacetrack Report #3"
+> (AIAA 2006-6753).
+
+`src/satellite.c` implements a hand-built **near-Earth-only** SGP4
+propagator validated against Vallado's published `tcppver.out` test
+vectors to **~7 nm position agreement** at 4320-minute propagation
+(see `tests/test_sgp4_propagation.c`).
+
+**Pipeline** (caller-visible flow):
+
+```
+TLE text  →  satellite_tle_parse  →  SatelliteTLE
+SatelliteTLE  →  satellite_model_init  →  SatelliteModel  (WGS-72, AFSPC)
+(model, tsince_min)  →  satellite_propagate_teme  →  r,v in TEME (km, km/s)
+(r_teme, v_teme, jd, observer)
+   →  satellite_eci_to_topocentric  →  alt, az, range, range_rate
+```
+
+**Frames** —
+
+- **TEME** (True Equator Mean Equinox) is what SGP4 outputs natively.
+  Not J2000, not ICRF, not what voidwatch's planet-RA/Dec path uses.
+- **ECEF** is computed by rotating TEME about z by −GMST (Vallado eq
+  3-45 polynomial — *not* the Meeus 12.4 form used elsewhere in
+  voidwatch; SGP4 verification vectors are tied to this exact
+  expression).
+- Polar motion is set to zero. UT1−UTC corrections (EOP files) are
+  ignored. The result is "visual-grade" — TEME vectors remain the
+  strict-validation target.
+
+**Constants** — WGS-72 throughout:
+
+```
+mu = 398600.8 km³/s²       J2 =  0.001082616
+R⊕ = 6378.135 km           J3 = -2.53881e-6
+xke = 60 / sqrt(R³/μ)       J4 = -1.65597e-6
+        ≈ 0.07436692
+flattening f = 1/298.26    Earth ω = 7.2921150e-5 rad/s
+```
+
+WGS-84 (Earth-fixed) constants are *not* mixed in for the observer's
+geodetic→ECEF transform. Mixing would introduce a few-tens-of-metres
+systematic offset that hides in "visual-grade" but compounds for pass
+timing, so the observer ellipsoid stays on WGS-72 too.
+
+**Deep-space (SDP4) deferred.** voidwatch's bundled targets (ISS,
+Hubble, NOAA 19, Tiangong) are all near-Earth (period < 225 min).
+Anything with period ≥ 225 min returns `SAT_DEEP_SPACE` from
+`satellite_model_init` and does not propagate. The dscom / dpper /
+dsinit / dspace body can land later without changing any public API.
+
+**Look-angle convention** — north = 0 azimuth, east = π/2 (clockwise
+from north, matching voidwatch's planet path). Altitude positive is
+above the horizon.
+
+**Stale-TLE policy** (enforced in `satellite_compute_all` and the
+astro render path):
+
+| TLE age            | Behavior                                       |
+| ------------------ | ---------------------------------------------- |
+| ≤ 7 days           | Normal (full brightness, full label)           |
+| 7 < age ≤ 14 days  | Half-dim brightness, label fades               |
+| 14 < age ≤ 30 days | Hidden from render; JSON shows `stale: true`   |
+| > 30 days          | `compute_all` refuses; `valid: false`          |
+
+This is policy, not SGP4 math — TLEs degrade ~1-3 km/day, so a fresh
+fetch is preferable to inferring from old elements.
+
+---
+
 ## Things voidwatch deliberately doesn't compute
 
 For completeness, here are corrections / refinements voidwatch
@@ -869,6 +942,12 @@ does *not* apply, with notes on why:
   (2nd ed.). Willmann-Bell.
 - **Jenniskens, P.** (2006). *Meteor Showers and Their Parent
   Comets*. Cambridge University Press.
+- **Hoots, F. R. & Roehrich, R. L.** (1980). "Spacetrack Report No. 3:
+  Models for Propagation of NORAD Element Sets." NORAD/USAF.
+- **Vallado, D. A., Crawford, P., Hujsak, R. & Kelso, T. S.** (2006).
+  "Revisiting Spacetrack Report #3." AIAA 2006-6753 (AAS/AIAA
+  Astrodynamics Specialist Conference).
+  https://celestrak.org/publications/AIAA/2006-6753/
 
 ### Data sources
 
