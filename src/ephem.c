@@ -381,6 +381,42 @@ void ephem_to_topocentric(EphemPosition *pos, const Observer *obs, double jd) {
     pos->az_rad  = wrap_2pi(az);
 }
 
+/* Inverse: (alt, az, lat) → (δ, H), then α = LST − H. Derived from the
+ * same identities the forward path uses (Meeus 13.5–13.6 inverted). */
+void ephem_altaz_to_radec(EphemPosition *pos, const Observer *obs, double jd) {
+    double lst_h   = ephem_local_sidereal_hours(jd, obs->lon_rad);
+    double lst_rad = lst_h * 15.0 * DEG2RAD;
+
+    double sin_lat = sin(obs->lat_rad);
+    double cos_lat = cos(obs->lat_rad);
+    double sin_alt = sin(pos->alt_rad);
+    double cos_alt = cos(pos->alt_rad);
+    double sin_az  = sin(pos->az_rad);
+    double cos_az  = cos(pos->az_rad);
+
+    double sin_dec = sin_lat * sin_alt + cos_lat * cos_alt * cos_az;
+    if (sin_dec >  1.0) sin_dec =  1.0;
+    if (sin_dec < -1.0) sin_dec = -1.0;
+    double dec = asin(sin_dec);
+    double cos_dec = cos(dec);
+
+    /* H from atan2(sin(H), cos(H)). At exact poles cos_dec → 0; the atan2
+     * still gives a defined (degenerate) answer. */
+    double sH, cH;
+    if (cos_dec < 1e-12) {
+        sH = 0.0;
+        cH = 1.0;
+    } else {
+        sH = -sin_az * cos_alt / cos_dec;
+        cH = (sin_alt - sin_dec * sin_lat) / (cos_dec * cos_lat);
+    }
+    double H  = atan2(sH, cH);
+    double ra = wrap_2pi(lst_rad - H);
+
+    pos->ra_rad  = ra;
+    pos->dec_rad = dec;
+}
+
 const char *ephem_name(EphemBody b) {
     switch (b) {
         case EPHEM_SUN:     return "Sun";

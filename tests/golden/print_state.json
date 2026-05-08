@@ -1,0 +1,31 @@
+{
+  "time": {"iso": "2024-04-08T18:00:00+0000", "jd": 2460409.250000, "lst_hours": 1.839021},
+  "observer": {"lat_deg": 32.700000, "lon_deg": -79.900000},
+  "planets": [
+    {"name": "Sun", "ra_h": 1.1930, "dec_deg": 7.5882, "alt_deg": 63.3268, "az_deg": 201.8179, "mag": -26.740, "dist_au": 1.001482},
+    {"name": "Moon", "ra_h": 1.1718, "dec_deg": 7.8343, "alt_deg": 63.4582, "az_deg": 202.6634, "mag": -10.000, "dist_au": 0.002404},
+    {"name": "Mercury", "ra_h": 1.4400, "dec_deg": 12.1178, "alt_deg": 68.6987, "az_deg": 196.3000, "mag": -3.476, "dist_au": 0.606757},
+    {"name": "Venus", "ra_h": 0.2904, "dec_deg": 0.2550, "alt_deg": 50.8675, "az_deg": 218.6779, "mag": -4.008, "dist_au": 1.646786},
+    {"name": "Mars", "ra_h": 22.9694, "dec_deg": -7.9378, "alt_deg": 32.3100, "az_deg": 233.1176, "mag": 0.762, "dist_au": 2.060699},
+    {"name": "Jupiter", "ra_h": 3.0958, "dec_deg": 16.6010, "alt_deg": 66.5670, "az_deg": 128.8632, "mag": -2.067, "dist_au": 5.850224},
+    {"name": "Saturn", "ra_h": 23.0729, "dec_deg": -7.7753, "alt_deg": 33.4664, "az_deg": 231.8952, "mag": 1.161, "dist_au": 10.505723},
+    {"name": "Uranus", "ra_h": 3.2330, "dec_deg": 17.7025, "alt_deg": 65.9432, "az_deg": 123.4814, "mag": 5.822, "dist_au": 20.433794},
+    {"name": "Neptune", "ra_h": 23.9010, "dec_deg": -1.9752, "alt_deg": 45.7619, "az_deg": 224.1101, "mag": 7.953, "dist_au": 30.826000}
+  ],
+  "comets": [
+    {"name": "1P/Halley", "ra_h": 8.1837, "dec_deg": 3.0215, "alt_deg": -2.7080, "az_deg": 84.6596, "mag": 44.107, "dist_au": 34.8045, "r_helio_au": 35.0706},
+    {"name": "2P/Encke", "ra_h": 22.2994, "dec_deg": -14.2741, "alt_deg": 20.8865, "az_deg": 236.0420, "mag": 15.908, "dist_au": 3.0520, "r_helio_au": 2.4947},
+    {"name": "109P/Swift-Tuttle", "ra_h": 9.5855, "dec_deg": -19.6111, "alt_deg": -32.0915, "az_deg": 93.9103, "mag": 28.248, "dist_au": 40.9551, "r_helio_au": 41.5590},
+    {"name": "21P/Giacobini-Zinner", "ra_h": 15.6474, "dec_deg": 2.1694, "alt_deg": -46.7161, "az_deg": 318.3533, "mag": 14.338, "dist_au": 3.0254, "r_helio_au": 3.8618},
+    {"name": "67P/Churyumov-Gerasimenko", "ra_h": 17.5029, "dec_deg": -26.3958, "alt_deg": -42.2965, "az_deg": 262.5222, "mag": 21.886, "dist_au": 4.9844, "r_helio_au": 5.4933},
+    {"name": "Hale-Bopp", "ra_h": 23.0057, "dec_deg": -83.7601, "alt_deg": -28.0087, "az_deg": 184.7710, "mag": 16.341, "dist_au": 48.2940, "r_helio_au": 48.3426}
+  ],
+  "asteroids": [
+    {"name": "1 Ceres", "ra_h": 2.1252, "dec_deg": 7.0556, "alt_deg": 64.0472, "az_deg": 170.2280, "mag": 8.524, "dist_au": 3.8138, "r_helio_au": 2.8534},
+    {"name": "2 Pallas", "ra_h": 21.0178, "dec_deg": 8.9389, "alt_deg": 19.6599, "az_deg": 268.0927, "mag": 9.672, "dist_au": 3.7670, "r_helio_au": 3.4070},
+    {"name": "4 Vesta", "ra_h": 21.7981, "dec_deg": -15.3110, "alt_deg": 14.8101, "az_deg": 240.3754, "mag": 7.016, "dist_au": 2.6244, "r_helio_au": 2.2093},
+    {"name": "3 Juno", "ra_h": 1.9360, "dec_deg": 5.3439, "alt_deg": 62.6103, "az_deg": 176.8512, "mag": 9.232, "dist_au": 2.9891, "r_helio_au": 2.0180},
+    {"name": "7 Iris", "ra_h": 18.7548, "dec_deg": -23.0242, "alt_deg": -25.3530, "az_deg": 257.8702, "mag": 9.683, "dist_au": 2.4530, "r_helio_au": 2.7854}
+  ],
+  "active_shower": null
+}

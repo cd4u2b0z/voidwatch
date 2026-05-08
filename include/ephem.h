@@ -51,6 +51,12 @@ void ephem_compute(EphemBody body, double jd, EphemPosition *pos);
  * the cell-scale visual). */
 void ephem_to_topocentric(EphemPosition *pos, const Observer *obs, double jd);
 
+/* Inverse of ephem_to_topocentric: reads pos->alt_rad and pos->az_rad,
+ * fills pos->ra_rad and pos->dec_rad. Exposed so the projection round-trip
+ * test can verify (RA,Dec) → (alt,az) → (RA,Dec) closes. Production code
+ * doesn't need this. */
+void ephem_altaz_to_radec(EphemPosition *pos, const Observer *obs, double jd);
+
 /* Local Apparent Sidereal Time, hours [0, 24). */
 double ephem_local_sidereal_hours(double jd, double lon_east_rad);
 

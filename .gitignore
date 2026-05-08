@@ -7,3 +7,8 @@ GEMINI.md
 .cache/
 compile_commands.json
 tools/data/
+tests/test_framebuffer
+tests/test_projection
+tests/test_nbody
+tests/test_json
+tests/golden/.actual.json
