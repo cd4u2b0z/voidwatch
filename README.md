@@ -166,7 +166,7 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   0         reset speed + scrub
   , / .     scrub time -1h / +1h
   m         toggle geo / helio view
-  s         toggle helio star backdrop
+  s         toggle decorative star backdrop (geo + helio)
   g         toggle alt-az grid
   l         toggle constellation lines
   d         toggle deep-sky objects (M31, M42, …)

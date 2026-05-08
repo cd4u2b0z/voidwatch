@@ -82,7 +82,7 @@ static void print_help(const char *argv0) {
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
         "              g grid, l constellation lines, d deep-sky,\n"
         "              a aurora, t trails, m geo/helio,\n"
-        "              s helio backdrop, c cursor (hjkl, Esc).\n",
+        "              s star backdrop, c cursor (hjkl, Esc).\n",
         argv0);
 }
 
@@ -200,8 +200,8 @@ int main(int argc, char **argv) {
     }
 
     AstroState astro = {0};
-    astro.show_helio_stars = 1;        /* on by default in helio mode */
-    astro.show_dso         = 1;        /* DSOs visible by default in geo */
+    astro.show_star_backdrop = 1;      /* parallax backdrop on by default */
+    astro.show_dso           = 1;      /* DSOs visible by default in geo */
     /* astro.show_aurora stays 0 — most observers are at mid-latitudes
      * where aurora isn't visible. Press `a` to force-render. */
     if (astro_mode) {
@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
                 astro.view_mode = !astro.view_mode;
             }
             else if (astro_mode && (k == 's' || k == 'S')) {
-                astro.show_helio_stars = !astro.show_helio_stars;
+                astro.show_star_backdrop = !astro.show_star_backdrop;
             }
             else if (astro_mode && (k == 'd' || k == 'D')) {
                 astro.show_dso = !astro.show_dso;
@@ -436,12 +436,12 @@ int main(int argc, char **argv) {
             particle_draw(&pa, &fb, rcam_x, rcam_y);
         }
         if (astro_mode) {
-            /* Helio backdrop: optional decorative parallax stars. The
-             * sandbox starfield doesn't represent real positions but it
-             * fills the empty solar-system frame with a pleasing field
-             * of dim points. Geo mode keeps a clean black backdrop —
-             * the HYG catalogue is the sky there. */
-            if (astro.view_mode == 1 && astro.show_helio_stars) {
+            /* Decorative parallax starfield as a backdrop. In helio
+             * mode it's the only star layer; in geo mode it sits behind
+             * the real HYG catalogue, giving a lively twinkle on top of
+             * the real positions. Toggle off with `s` for a pure
+             * astronomical view. */
+            if (astro.show_star_backdrop) {
                 starfield_draw(&sf, &fb, rcam_x, rcam_y, t_total, &snap);
             }
             astro_draw(&astro, &fb, cols, rows, &snap);

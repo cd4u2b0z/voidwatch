@@ -142,7 +142,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    a        toggle aurora",
         "    t        toggle planet trails",
         "    m        toggle geo / helio view",
-        "    s        toggle helio star backdrop",
+        "    s        toggle decorative star backdrop",
         "    c        toggle object cursor (hjkl move)",
         "",
         "  CLI flags",
