@@ -1,9 +1,6 @@
 voidwatch
 *.o
 *.d
-CLAUDE.md
-AGENTS.md
-GEMINI.md
 .cache/
 compile_commands.json
 tools/data/
