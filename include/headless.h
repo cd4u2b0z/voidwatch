@@ -30,4 +30,10 @@ int headless_print_state(const Observer *obs, time_t now, FILE *out, int json);
 int headless_next_rise(const Observer *obs, time_t now,
                        const char *name, FILE *out);
 
+/* `voidwatch --year <year>` — annual almanac for the given Gregorian
+ * year. Walks the whole year computing eclipses, planet-planet
+ * conjunctions, shower peak dates, equinoxes/solstices. Prints a
+ * sorted human-readable list. */
+int headless_year(const Observer *obs, int year, FILE *out);
+
 #endif

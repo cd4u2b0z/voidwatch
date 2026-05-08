@@ -90,6 +90,16 @@ void astro_update(AstroState *st, time_t now);
  * timestamp threaded through hud_draw / hud_log_event. */
 void astro_surface_events(const AstroState *st, double t_mono);
 
+/* Find the next "interesting" astronomical event after `from_jd`.
+ * Walks forward in 1-day steps up to `max_days`, returning the JD of
+ * the first eclipse / planet-planet conjunction / shower peak / solstice
+ * / equinox encountered. Writes a short label (≤ 28 chars) into
+ * `label_out` (caller-allocated). Returns 0 on hit, -1 if nothing
+ * within the window. Called by the `J` key handler in main.c. */
+int astro_find_next_event(const AstroState *st, double from_jd,
+                          int max_days,
+                          double *out_jd, char *label_out, size_t label_cap);
+
 /* Stamp body discs/labels into the framebuffer. Called between
  * `body_draw` and `render_flush` — same composite slot. */
 void astro_draw(const AstroState *st, Framebuffer *fb,

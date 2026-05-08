@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -440,6 +441,242 @@ int headless_print_state(const Observer *obs, time_t now, FILE *out, int json) {
         fprintf(out, "  \"active_shower\": null\n");
     }
     fprintf(out, "}\n");
+    return 0;
+}
+
+/* ---- Annual almanac (--year) -------------------------------------- */
+
+static double sep_rad(double ra1, double dec1, double ra2, double dec2) {
+    double c = sin(dec1) * sin(dec2)
+             + cos(dec1) * cos(dec2) * cos(ra1 - ra2);
+    if (c >  1.0) c =  1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c);
+}
+
+typedef struct {
+    double jd;
+    char   text[128];
+} YearEvent;
+
+static int year_event_cmp(const void *a, const void *b) {
+    double da = ((const YearEvent *)a)->jd;
+    double db = ((const YearEvent *)b)->jd;
+    return (da > db) - (da < db);
+}
+
+static double year_to_jd(int year, int month, double day) {
+    /* Meeus 7.1: Julian Day from Gregorian date. */
+    int y = year, m = month;
+    if (m <= 2) { y -= 1; m += 12; }
+    int A = y / 100;
+    int B = 2 - A + A / 4;
+    return (long)(365.25 * (y + 4716))
+         + (long)(30.6001 * (m + 1))
+         + day + B - 1524.5;
+}
+
+static void jd_to_local_str(double jd, char *buf, size_t cap) {
+    time_t t = (time_t)((jd - 2440587.5) * 86400.0);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    strftime(buf, cap, "%Y-%m-%d %H:%M", &tm);
+}
+
+int headless_year(const Observer *obs, int year, FILE *out) {
+    fprintf(out, "voidwatch — astronomical almanac for %d\n"
+                 "  observer %+06.2f\xC2\xB0  %+07.2f\xC2\xB0\n\n",
+            year, obs->lat_rad * RAD2DEG, obs->lon_rad * RAD2DEG);
+
+    double jd_start = year_to_jd(year, 1, 1.0);
+    double jd_end   = year_to_jd(year + 1, 1, 1.0);
+
+    /* Generous buffer — 36 conjunction pairs × 2 events + ~4 eclipses ×
+     * 2 + 9 showers + 4 solstices/equinoxes is well under 200. */
+    YearEvent ev[200];
+    int       n_ev = 0;
+
+    /* === Eclipses (daily mag scan) ================================== *
+     * For each day we compute the magnitude factors at noon UT. A daily
+     * sample misses fast partial eclipses but catches every total +
+     * annular within their multi-hour windows. Good enough for the
+     * almanac use case. */
+    int prev_solar_active = 0, prev_lunar_active = 0;
+    double solar_peak_jd = 0, lunar_peak_jd = 0;
+    double solar_peak_mag = 0, lunar_peak_mag = 0;
+    for (double jd = jd_start; jd < jd_end; jd += 0.5) {
+        /* Compute Sun/Moon RA/Dec at this jd */
+        EphemPosition s, m;
+        ephem_compute(EPHEM_SUN, jd, &s);
+        ephem_compute(EPHEM_MOON, jd, &m);
+        double sep_sm = sep_rad(s.ra_rad, s.dec_rad, m.ra_rad, m.dec_rad);
+        double anti_ra = s.ra_rad + M_PI;
+        double anti_dec = -s.dec_rad;
+        double sep_lm = sep_rad(anti_ra, anti_dec, m.ra_rad, m.dec_rad);
+
+        double sf = (0.012 - sep_sm) / 0.012;
+        if (sf < 0) sf = 0;
+        double lf = (0.022 - sep_lm) / 0.022;
+        if (lf < 0) lf = 0;
+
+        int now_s = (sf > 0.05);
+        int now_l = (lf > 0.05);
+
+        if (now_s) {
+            if (sf > solar_peak_mag) { solar_peak_mag = sf; solar_peak_jd = jd; }
+        }
+        if (!now_s && prev_solar_active && n_ev < 200) {
+            char buf[64];
+            jd_to_local_str(solar_peak_jd, buf, sizeof buf);
+            ev[n_ev].jd = solar_peak_jd;
+            snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                     "  %s  solar eclipse  (mag %.2f)", buf, solar_peak_mag);
+            n_ev++;
+            solar_peak_mag = 0;
+        }
+        prev_solar_active = now_s;
+
+        if (now_l) {
+            if (lf > lunar_peak_mag) { lunar_peak_mag = lf; lunar_peak_jd = jd; }
+        }
+        if (!now_l && prev_lunar_active && n_ev < 200) {
+            char buf[64];
+            jd_to_local_str(lunar_peak_jd, buf, sizeof buf);
+            ev[n_ev].jd = lunar_peak_jd;
+            snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                     "  %s  lunar eclipse  (mag %.2f)", buf, lunar_peak_mag);
+            n_ev++;
+            lunar_peak_mag = 0;
+        }
+        prev_lunar_active = now_l;
+    }
+
+    /* === Equinoxes / solstices ====================================== *
+     * Sun's apparent ecliptic longitude reaches 0/90/180/270 deg. We
+     * detect crossings of those longitudes via daily samples + linear
+     * interpolation. */
+    static const struct { double lon_deg; const char *name; } sol_eq[] = {
+        {   0.0, "vernal equinox"   },
+        {  90.0, "summer solstice"  },
+        { 180.0, "autumnal equinox" },
+        { 270.0, "winter solstice"  },
+    };
+    /* Sun ecliptic longitude wraps; track previous value and detect
+     * crossings. Derive from RA/Dec via the standard rotation:
+     * tan(lon) = (sin RA cos eps + tan dec sin eps) / cos RA. */
+    EphemPosition sp;
+    ephem_compute(EPHEM_SUN, jd_start, &sp);
+    double eps = ephem_obliquity_rad(jd_start);
+    double prev_lon = atan2(sin(sp.ra_rad) * cos(eps) + tan(sp.dec_rad) * sin(eps),
+                            cos(sp.ra_rad));
+    if (prev_lon < 0) prev_lon += 2 * M_PI;
+    double prev_jd = jd_start;
+    for (double jd = jd_start + 1.0; jd < jd_end; jd += 1.0) {
+        EphemPosition s;
+        ephem_compute(EPHEM_SUN, jd, &s);
+        eps = ephem_obliquity_rad(jd);
+        double lon = atan2(sin(s.ra_rad) * cos(eps) + tan(s.dec_rad) * sin(eps),
+                           cos(s.ra_rad));
+        if (lon < 0) lon += 2 * M_PI;
+
+        for (size_t k = 0; k < sizeof sol_eq / sizeof sol_eq[0]; k++) {
+            double target = sol_eq[k].lon_deg * DEG2RAD;
+            /* Did we cross the target between prev_lon and lon? Handle
+             * wrap-around by unwrapping. */
+            double a = prev_lon, b = lon;
+            if (b < a) b += 2 * M_PI;
+            double t = target;
+            if (t < a) t += 2 * M_PI;
+            if (a <= t && t <= b && b - a < M_PI) {
+                double frac = (t - a) / (b - a);
+                double cross_jd = prev_jd + frac * (jd - prev_jd);
+                char buf[64];
+                jd_to_local_str(cross_jd, buf, sizeof buf);
+                if (n_ev < 200) {
+                    ev[n_ev].jd = cross_jd;
+                    snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                             "  %s  %s", buf, sol_eq[k].name);
+                    n_ev++;
+                }
+            }
+        }
+        prev_lon = lon;
+        prev_jd = jd;
+    }
+
+    /* === Planet-planet conjunctions ================================ *
+     * Daily sample each pair; closest-approach tracked across the
+     * year; one event per pair-conjunction window. */
+    for (int i = EPHEM_MERCURY; i <= EPHEM_NEPTUNE; i++) {
+        for (int j = i + 1; j <= EPHEM_NEPTUNE; j++) {
+            int active = 0;
+            double min_sep = 1e9, min_jd = 0;
+            for (double jd = jd_start; jd < jd_end; jd += 1.0) {
+                EphemPosition pa, pb;
+                ephem_compute((EphemBody)i, jd, &pa);
+                ephem_compute((EphemBody)j, jd, &pb);
+                double s = sep_rad(pa.ra_rad, pa.dec_rad,
+                                   pb.ra_rad, pb.dec_rad);
+                if (s < 0.0175) {
+                    active = 1;
+                    if (s < min_sep) { min_sep = s; min_jd = jd; }
+                } else if (active) {
+                    /* Window ended — emit the closest approach. */
+                    char buf[64];
+                    jd_to_local_str(min_jd, buf, sizeof buf);
+                    if (n_ev < 200) {
+                        ev[n_ev].jd = min_jd;
+                        snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                                 "  %s  %s-%s conjunction (%.2f\xC2\xB0)",
+                                 buf,
+                                 ephem_name((EphemBody)i),
+                                 ephem_name((EphemBody)j),
+                                 min_sep * RAD2DEG);
+                        n_ev++;
+                    }
+                    active = 0;
+                    min_sep = 1e9;
+                }
+            }
+            /* Tail: if still active at year end, flush */
+            if (active && n_ev < 200) {
+                char buf[64];
+                jd_to_local_str(min_jd, buf, sizeof buf);
+                ev[n_ev].jd = min_jd;
+                snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                         "  %s  %s-%s conjunction (%.2f\xC2\xB0)",
+                         buf,
+                         ephem_name((EphemBody)i),
+                         ephem_name((EphemBody)j),
+                         min_sep * RAD2DEG);
+                n_ev++;
+            }
+        }
+    }
+
+    /* === Major meteor showers ====================================== *
+     * Pull peaks straight from the bundled table — DOY → JD via the
+     * year's Jan 1. ZHR + name printed for each. */
+    for (int i = 0; i < h_shower_count; i++) {
+        const HShower *s = &h_showers[i];
+        double peak_jd = year_to_jd(year, 1, (double)s->peak_doy);
+        char buf[64];
+        jd_to_local_str(peak_jd, buf, sizeof buf);
+        if (n_ev < 200) {
+            ev[n_ev].jd = peak_jd;
+            snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                     "  %s  %s peak  (ZHR %d)", buf, s->name, s->zhr);
+            n_ev++;
+        }
+    }
+
+    /* Sort all events chronologically and print. */
+    qsort(ev, n_ev, sizeof ev[0], year_event_cmp);
+    for (int i = 0; i < n_ev; i++) {
+        fputs(ev[i].text, out);
+        fputc('\n', out);
+    }
+    fprintf(out, "\n%d events.\n", n_ev);
     return 0;
 }
 

@@ -1503,6 +1503,135 @@ void astro_surface_events(const AstroState *st, double t_mono) {
     if (now_lunar && !prev_lunar)        hud_log_event(t_mono, "lunar eclipse begins");
     else if (!now_lunar && prev_lunar)   hud_log_event(t_mono, "lunar eclipse ends");
     prev_lunar = now_lunar;
+
+    /* Planet-planet conjunctions — angular separation under ~1° (anything
+     * tighter is too rare; anything looser is uninteresting). Mercury
+     * through Neptune only — Sun is daytime, Moon's monthly sweep would
+     * spam the log. 21 pair checks per frame, all dot-products. */
+    static int prev_conj[EPHEM_COUNT][EPHEM_COUNT];
+    const double CONJ_THRESHOLD = 0.0175;     /* 1.0° in radians */
+    for (int i = EPHEM_MERCURY; i <= EPHEM_NEPTUNE; i++) {
+        for (int j = i + 1; j <= EPHEM_NEPTUNE; j++) {
+            const EphemPosition *a = &st->pos[i];
+            const EphemPosition *b = &st->pos[j];
+            /* Both must be above horizon to read as a conjunction. */
+            if (a->alt_rad < 0.0 || b->alt_rad < 0.0) {
+                prev_conj[i][j] = 0;
+                continue;
+            }
+            double sep = angular_sep_rad(a->ra_rad, a->dec_rad,
+                                         b->ra_rad, b->dec_rad);
+            int now_conj = (sep < CONJ_THRESHOLD);
+            if (now_conj && !prev_conj[i][j]) {
+                char buf[28];
+                snprintf(buf, sizeof buf, "%s-%s conj %.1f\xC2\xB0",
+                         ephem_short((EphemBody)i),
+                         ephem_short((EphemBody)j),
+                         sep * RAD2DEG);
+                hud_log_event(t_mono, buf);
+            } else if (!now_conj && prev_conj[i][j]) {
+                /* End: just a clean separation announcement. */
+                char buf[28];
+                snprintf(buf, sizeof buf, "%s-%s separating",
+                         ephem_short((EphemBody)i),
+                         ephem_short((EphemBody)j));
+                hud_log_event(t_mono, buf);
+            }
+            prev_conj[i][j] = now_conj;
+        }
+    }
+}
+
+/* Walk forward one day at a time looking for any event. Cheap enough
+ * (Meeus is fast) that scanning a year takes a few hundred ms. Used by
+ * the `J` key in main.c — jumps the virtual clock to the next event. */
+int astro_find_next_event(const AstroState *st, double from_jd,
+                          int max_days,
+                          double *out_jd, char *label_out, size_t label_cap) {
+    /* Skip the first half-day so we don't re-fire the event we're
+     * currently sitting on. */
+    double jd = from_jd + 0.5;
+    double end = jd + (double)max_days;
+
+    /* Need a writable AstroState-like for ephem_compute / sep checks.
+     * Just reuse positions array values from `st->observer`. */
+    Observer obs = st->observer;
+    (void)obs;        /* lat used implicitly by some of the below */
+
+    double prev_solar_sep = 1e9, prev_lunar_sep = 1e9;
+    int    sm_set = 0;
+    double prev_planet_sep[EPHEM_COUNT][EPHEM_COUNT];
+    int    psep_set = 0;
+    (void)prev_solar_sep; (void)prev_lunar_sep;
+    for (int i = 0; i < EPHEM_COUNT; i++)
+        for (int j = 0; j < EPHEM_COUNT; j++)
+            prev_planet_sep[i][j] = 1e9;
+
+    while (jd < end) {
+        EphemPosition s, m;
+        ephem_compute(EPHEM_SUN,  jd, &s);
+        ephem_compute(EPHEM_MOON, jd, &m);
+
+        /* Eclipse — sep crosses below threshold. */
+        double sep_sm = angular_sep_rad(s.ra_rad, s.dec_rad,
+                                         m.ra_rad, m.dec_rad);
+        if (sep_sm < 0.012) {
+            *out_jd = jd;
+            snprintf(label_out, label_cap, "solar eclipse");
+            return 0;
+        }
+        double anti_ra = s.ra_rad + M_PI, anti_dec = -s.dec_rad;
+        double sep_lm = angular_sep_rad(anti_ra, anti_dec,
+                                         m.ra_rad, m.dec_rad);
+        if (sep_lm < 0.022) {
+            *out_jd = jd;
+            snprintf(label_out, label_cap, "lunar eclipse");
+            return 0;
+        }
+        sm_set = 1;
+        (void)sm_set;
+
+        /* Planet-planet conjunction — pair sep dips below 1°. We need
+         * the previous-step sep to detect the dip moment, not just any
+         * sub-1° sample (which would always trigger if we stepped into
+         * an active window). */
+        EphemPosition p[EPHEM_COUNT];
+        for (int i = EPHEM_MERCURY; i <= EPHEM_NEPTUNE; i++) {
+            ephem_compute((EphemBody)i, jd, &p[i]);
+        }
+        for (int i = EPHEM_MERCURY; i <= EPHEM_NEPTUNE; i++) {
+            for (int j = i + 1; j <= EPHEM_NEPTUNE; j++) {
+                double sep = angular_sep_rad(p[i].ra_rad, p[i].dec_rad,
+                                              p[j].ra_rad, p[j].dec_rad);
+                if (psep_set && sep < 0.0175 && prev_planet_sep[i][j] >= 0.0175) {
+                    *out_jd = jd;
+                    snprintf(label_out, label_cap, "%s-%s conjunction",
+                             ephem_short((EphemBody)i),
+                             ephem_short((EphemBody)j));
+                    return 0;
+                }
+                prev_planet_sep[i][j] = sep;
+            }
+        }
+        psep_set = 1;
+
+        /* Meteor shower peak — DOY match (within ±0.5 day). */
+        for (int i = 0; i < meteor_shower_count; i++) {
+            const MeteorShower *sh = &meteor_showers[i];
+            double frac = jd - 2451544.5;
+            double yfrac = fmod(frac / 365.25, 1.0);
+            if (yfrac < 0.0) yfrac += 1.0;
+            double doy = yfrac * 365.25 + 1.0;
+            if (fabs(doy - sh->peak_doy) < 0.5) {
+                *out_jd = jd;
+                snprintf(label_out, label_cap, "%s peak", sh->name);
+                return 0;
+            }
+        }
+
+        jd += 1.0;
+    }
+    return -1;
 }
 
 /* === Heliocentric "above the ecliptic" view ========================= *

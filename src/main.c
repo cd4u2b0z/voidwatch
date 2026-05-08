@@ -71,6 +71,7 @@ static void print_help(const char *argv0) {
         "  --print-state          full ephemeris + comets + asteroids (text)\n"
         "  --print-state --json   same as JSON\n"
         "  --next <body>          next rise time for a planet/comet/asteroid\n"
+        "  --year <year>          annual almanac for the given Gregorian year\n"
         "\n"
         "  -h, --help             show this help and exit\n"
         "\n"
@@ -91,11 +92,12 @@ int main(int argc, char **argv) {
     const char *theme_path  = NULL;
     const char *config_path = NULL;
     const char *next_body   = NULL;
+    int         year_arg    = 0;
     int         no_audio    = 0;
     int         astro_mode  = 0;
     double      cli_lat     = NAN;
     double      cli_lon     = NAN;
-    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT } headless = HL_NONE;
+    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR } headless = HL_NONE;
     int         json_output = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -162,6 +164,20 @@ int main(int argc, char **argv) {
             }
             headless = HL_NEXT;
             next_body = argv[++i];
+        } else if (strcmp(a, "--year") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "voidwatch: --year requires a year.\n");
+                return 2;
+            }
+            const char *s = argv[++i];
+            char *end = NULL;
+            long y = strtol(s, &end, 10);
+            if (end == s || *end != '\0' || y < 1900 || y > 2200) {
+                fprintf(stderr, "voidwatch: --year: bad year: %s\n", s);
+                return 2;
+            }
+            headless  = HL_YEAR;
+            year_arg  = (int)y;
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
             print_help(argv[0]);
             return 0;
@@ -195,6 +211,7 @@ int main(int argc, char **argv) {
             case HL_TONIGHT:     return headless_tonight(&obs, now, stdout);
             case HL_PRINT_STATE: return headless_print_state(&obs, now, stdout, json_output);
             case HL_NEXT:        return headless_next_rise(&obs, now, next_body, stdout);
+            case HL_YEAR:        return headless_year(&obs, year_arg, stdout);
             case HL_NONE: break;
         }
     }
@@ -319,6 +336,29 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && k == ',') { astro_offset -= 3600.0; }
             else if (astro_mode && k == '.') { astro_offset += 3600.0; }
+            else if (astro_mode && (k == 'j' || k == 'J')
+                     && !astro.cursor_active) {
+                /* Jump the virtual clock to the next "interesting" event:
+                 * eclipse, planet-planet conjunction, shower peak. Search
+                 * up to 400 days forward from the current virt_jd. */
+                double jd_now = ephem_julian_day_from_unix(
+                                  time(NULL) + (time_t)astro_offset);
+                double jd_event;
+                char   label[28];
+                if (astro_find_next_event(&astro, jd_now, 400,
+                                          &jd_event, label, sizeof label) == 0) {
+                    /* Convert event JD back to a unix-time offset. */
+                    time_t target_unix =
+                        (time_t)((jd_event - 2440587.5) * 86400.0);
+                    astro_offset += (double)(target_unix - (time(NULL)
+                                              + (time_t)astro_offset));
+                    char buf[40];
+                    snprintf(buf, sizeof buf, "jump → %s", label);
+                    hud_log_event(t_total, buf);
+                } else {
+                    hud_log_event(t_total, "no events in next 400 days");
+                }
+            }
         }
         if (quitting) break;
 
