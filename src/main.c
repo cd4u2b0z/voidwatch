@@ -416,15 +416,24 @@ int main(int argc, char **argv) {
         float rcam_x = cam_x + shake_x;
         float rcam_y = cam_y + shake_y;
 
-        /* Astro mode uses a fast decay (0.5) rather than full clear:
-         * - Body stamps fade in ~4 frames, so even at 1000x time-scrub
-         *   the per-frame motion (sub-pixel) doesn't leave visible smear.
-         * - The decorative starfield's twinkle has a decay halo that
-         *   gives the sky a "pulsing/glowing" feel instead of an
-         *   instant per-frame flick.
-         * Sandbox keeps the configurable g_config.fb_decay (defaults to
-         * 0.92 — long phosphorescent trails for N-body aesthetic). */
-        if (astro_mode)                      fb_decay(&fb, 0.5f);
+        /* Astro decay scales with time-scrub speed. At 1x (real time,
+         * most use) we use the sandbox-grade 0.92 — full star flicker /
+         * twinkle pulses, no body smear because per-frame body motion
+         * is sub-pixel. At 1000x+ scrub we drop toward 0.5 — bodies
+         * fade in ~4 frames so they don't leave grid-blob trails when
+         * they're crossing many pixels per frame. Log interpolation
+         * across the [1, 1000] range gives a smooth handoff. */
+        if (astro_mode) {
+            double s = fabs(astro_speed);
+            float decay;
+            if (s <= 1.0)            decay = 0.92f;
+            else if (s >= 1000.0)    decay = 0.50f;
+            else {
+                float t = (float)(log10(s) / 3.0);
+                decay = 0.92f - 0.42f * t;
+            }
+            fb_decay(&fb, decay);
+        }
         else if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
         else                                 fb_clear(&fb);
 
