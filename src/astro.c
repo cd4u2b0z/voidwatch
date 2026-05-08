@@ -544,7 +544,9 @@ static void stamp_moon(Framebuffer *fb, float cx, float cy,
 
     float sigma = s->radius_sub;
     float two_sigma_sq = 2.0f * sigma * sigma;
-    float box = sigma * 3.0f;
+    /* 2σ clip — past this point the Gaussian tail crosses LUM_THRESHOLD
+     * unevenly and produces speckled halos. Sharper edge, no fuzz. */
+    float box = sigma * 2.0f;
     float R = sigma;     /* radius for offset normalisation */
 
     int x0 = (int)floorf(cx - box);
@@ -808,7 +810,7 @@ static void stamp_saturn(Framebuffer *fb, float cx, float cy,
     {
         float sigma = s->radius_sub;
         float two_sigma_sq = 2.0f * sigma * sigma;
-        float box = sigma * 3.0f;
+        float box = sigma * 2.0f;        /* 2σ clip — see stamp_body */
         int x0 = (int)floorf(cx - box);
         int x1 = (int)ceilf (cx + box);
         int y0 = (int)floorf(cy - box);
@@ -838,7 +840,7 @@ static void stamp_body(Framebuffer *fb, float cx, float cy,
                        const AstroStyle *s) {
     float sigma = s->radius_sub;
     float two_sigma_sq = 2.0f * sigma * sigma;
-    float box = sigma * 3.0f;
+    float box = sigma * 2.0f;        /* 2σ clip — see stamp_moon */
 
     int x0 = (int)floorf(cx - box);
     int x1 = (int)ceilf (cx + box);
@@ -1275,9 +1277,11 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
     /* Optional alt-az grid sits behind the constellations + stars. */
     if (st->show_grid) grid_draw(st, fb);
 
-    /* Constellation stick figures *before* stars so brighter star stamps
-     * cleanly overdraw line dots near the line endpoints. */
-    constellations_draw(st, fb);
+    /* Constellation stick figures are an opt-in overlay (`l`). When on,
+     * draw before stars so brighter star stamps cleanly overdraw line
+     * dots near the endpoints. Default off — most of the time the user
+     * wants a clean naked sky. */
+    if (st->show_constellations) constellations_draw(st, fb);
     stars_draw(st, fb);
 
     /* Trails behind the planet discs — additive so newest sample blends

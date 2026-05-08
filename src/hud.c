@@ -137,6 +137,7 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    0        reset speed + scrub",
         "    , / .    scrub time -1h / +1h",
         "    g        toggle alt-az grid",
+        "    l        toggle constellation lines",
         "    t        toggle planet trails",
         "    c        toggle object cursor (hjkl move)",
         "",

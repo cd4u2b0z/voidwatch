@@ -45,9 +45,10 @@ typedef struct {
     double         moon_elongation;
 
     /* Toggles */
-    int            show_grid;       /* alt-az grid lines (key: g)        */
-    int            show_trails;     /* planet RA/Dec trails (key: t)     */
-    int            cursor_active;   /* object-pick cursor on (key: c)    */
+    int            show_grid;            /* alt-az grid lines (key: g)        */
+    int            show_constellations;  /* constellation stick figures (l)   */
+    int            show_trails;          /* planet RA/Dec trails (key: t)     */
+    int            cursor_active;        /* object-pick cursor on (key: c)    */
 
     /* Trail ring buffers per body. */
     TrailSample    trails[EPHEM_COUNT][ASTRO_TRAIL_LEN];
