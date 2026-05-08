@@ -71,6 +71,16 @@
 #define WGS72_J3OJ2     (WGS72_J3 / WGS72_J2)
 #define WGS72_AE         1.0           /* unit Earth radius (canonical) */
 
+/* WGS-72 ellipsoid for the geodetic-observer ECEF transform (Phase 5).
+ * Use the same datum SGP4 was fit against — mixing WGS-84 (for the
+ * observer) with WGS-72 (for SGP4) introduces systematic offset that
+ * hides under "visual-grade" but compounds for sat-pass timing. */
+#define WGS72_FLATTENING (1.0 / 298.26)
+#define WGS72_E2 (2.0 * WGS72_FLATTENING - WGS72_FLATTENING * WGS72_FLATTENING)
+
+/* Earth rotation rate (IERS), rad/s. */
+#define EARTH_OMEGA_RAD_S 7.2921150e-5
+
 /* TLE_LINE_LEN excludes the trailing newline if present. */
 #define TLE_LINE_LEN 69
 
@@ -232,8 +242,10 @@ static int tle_year_pivot(int yy) {
  * radians at the given Julian Day UT1. Slightly different polynomial
  * form than Meeus 12.4 — keep this one because TLE epochs and Vallado
  * verification vectors are computed against this exact expression.
+ *
+ * Public name `satellite_gstime`; internal callers also use this.
  */
-static double sgp4_gstime(double jd_ut1) {
+double satellite_gstime(double jd_ut1) {
     double tut1 = (jd_ut1 - 2451545.0) / 36525.0;
     double sec  = -6.2e-6 * tut1 * tut1 * tut1
                 +  0.093104 * tut1 * tut1
@@ -451,7 +463,7 @@ SatelliteStatus satellite_model_init(const SatelliteTLE *tle,
     sat->ainv  = 1.0 / sat->ao;
     sat->posq  = po * po;
     sat->rp    = sat->ao * (1.0 - sat->ecco);
-    sat->gsto  = sgp4_gstime(sat->jdsatepoch);
+    sat->gsto  = satellite_gstime(sat->jdsatepoch);
 
     /* Brief-mandated: perigee below Earth surface = decayed orbit. NASA
      * SGP4.c comments this out (relies on the per-step mrt < 1 check),
@@ -751,4 +763,181 @@ SatelliteStatus satellite_propagate_teme(const SatelliteModel *sat,
      * surface during this propagation step. */
     if (mrt < 1.0) return SAT_PROP_ERROR;
     return SAT_OK;
+}
+
+/* ---- Phase 5: TEME → observer look angles ---------------------------
+ *
+ * Pipeline (per SATELLITES.md "Phase 5"):
+ *   1. r_teme, v_teme  → propagated by satellite_propagate_teme
+ *   2. r_teme  → r_ecef     (rotate by -GMST about z; ignore polar motion)
+ *   3. v_teme  → v_ecef     (rotate, then subtract Earth rotation × r)
+ *   4. observer (lat, lon, h)  → obs_ecef (WGS-72 ellipsoid)
+ *   5. range_ecef = r_ecef - obs_ecef
+ *   6. range_ecef → SEZ (south, east, zenith) at observer
+ *   7. (alt, az, range) from SEZ; range_rate from v_sat_ecef·range_hat
+ *
+ * Visual-grade — polar motion zero, no UT1-UTC, no nutation. Strict-
+ * grade work belongs upstream of TEME (Vallado vector validation in
+ * test_sgp4_propagation.c covers that gate).
+ */
+
+static void teme_to_ecef_pos(const double r_teme[3], double gmst,
+                             double r_ecef[3]) {
+    double c = cos(gmst);
+    double s = sin(gmst);
+    /* R_z(-gmst) — rotates from inertial-frame TEME into Earth-fixed. */
+    r_ecef[0] =  c * r_teme[0] + s * r_teme[1];
+    r_ecef[1] = -s * r_teme[0] + c * r_teme[1];
+    r_ecef[2] =  r_teme[2];
+}
+
+static void teme_v_to_ecef(const double r_teme[3], const double v_teme[3],
+                           double gmst, double v_ecef[3]) {
+    /* v_ecef = R_z(-gmst) · v_teme  −  ω × r_ecef. The ω vector points
+     * along Earth's spin axis (+z), so the cross product is just an
+     * in-plane swap. Earth rotation rate is rad/s, r is km → km/s. */
+    double r_ecef[3];
+    teme_to_ecef_pos(r_teme, gmst, r_ecef);
+    double c = cos(gmst);
+    double s = sin(gmst);
+    double vx_rot =  c * v_teme[0] + s * v_teme[1];
+    double vy_rot = -s * v_teme[0] + c * v_teme[1];
+    double vz_rot =  v_teme[2];
+    v_ecef[0] = vx_rot - (-EARTH_OMEGA_RAD_S * r_ecef[1]);
+    v_ecef[1] = vy_rot - ( EARTH_OMEGA_RAD_S * r_ecef[0]);
+    v_ecef[2] = vz_rot;
+}
+
+/* Geodetic (lat, lon, alt above ellipsoid) → ECEF. Latitude north
+ * positive, longitude east positive, altitude in km. WGS-72 datum so
+ * we stay consistent with the SGP4 frame. */
+static void geodetic_to_ecef(double lat_rad, double lon_rad,
+                             double alt_km, double r_ecef[3]) {
+    double sinlat = sin(lat_rad);
+    double coslat = cos(lat_rad);
+    double sinlon = sin(lon_rad);
+    double coslon = cos(lon_rad);
+    /* Prime vertical radius of curvature. */
+    double N = WGS72_RAD_KM / sqrt(1.0 - WGS72_E2 * sinlat * sinlat);
+    r_ecef[0] = (N + alt_km) * coslat * coslon;
+    r_ecef[1] = (N + alt_km) * coslat * sinlon;
+    r_ecef[2] = (N * (1.0 - WGS72_E2) + alt_km) * sinlat;
+}
+
+/* Rotate an ECEF vector into the local SEZ frame at observer (lat, lon).
+ * SEZ = (South, East, Zenith). */
+static void ecef_to_sez(const double r_ecef[3],
+                        double lat_rad, double lon_rad,
+                        double sez[3]) {
+    double sinlat = sin(lat_rad);
+    double coslat = cos(lat_rad);
+    double sinlon = sin(lon_rad);
+    double coslon = cos(lon_rad);
+    /* Standard rotation: R = R_y(π/2 − φ) · R_z(λ) reduced. */
+    sez[0] =  sinlat * coslon * r_ecef[0]
+            + sinlat * sinlon * r_ecef[1]
+            - coslat          * r_ecef[2];
+    sez[1] = -sinlon          * r_ecef[0]
+            + coslon          * r_ecef[1];
+    sez[2] =  coslat * coslon * r_ecef[0]
+            + coslat * sinlon * r_ecef[1]
+            + sinlat          * r_ecef[2];
+}
+
+SatelliteStatus satellite_eci_to_topocentric(const double r_teme_km[3],
+                                             const double v_teme_km_s[3],
+                                             double jd_ut1,
+                                             double obs_lat_rad,
+                                             double obs_lon_east_rad,
+                                             double obs_alt_km,
+                                             SatelliteState *out) {
+    if (!r_teme_km || !v_teme_km_s || !out) return SAT_BAD_FIELD;
+
+    /* Carry the TEME vectors through unchanged for callers that want
+     * both. */
+    out->r_teme_km[0] = r_teme_km[0];
+    out->r_teme_km[1] = r_teme_km[1];
+    out->r_teme_km[2] = r_teme_km[2];
+    out->v_teme_km_s[0] = v_teme_km_s[0];
+    out->v_teme_km_s[1] = v_teme_km_s[1];
+    out->v_teme_km_s[2] = v_teme_km_s[2];
+
+    /* TEME → ECEF rotation. */
+    double gmst = satellite_gstime(jd_ut1);
+    double sat_ecef[3], sat_v_ecef[3];
+    teme_to_ecef_pos(r_teme_km, gmst, sat_ecef);
+    teme_v_to_ecef(r_teme_km, v_teme_km_s, gmst, sat_v_ecef);
+
+    /* Observer geodetic → ECEF. */
+    double obs_ecef[3];
+    geodetic_to_ecef(obs_lat_rad, obs_lon_east_rad, obs_alt_km, obs_ecef);
+
+    /* Range vector in ECEF. */
+    double range_ecef[3] = {
+        sat_ecef[0] - obs_ecef[0],
+        sat_ecef[1] - obs_ecef[1],
+        sat_ecef[2] - obs_ecef[2],
+    };
+
+    /* SEZ at observer. */
+    double sez[3];
+    ecef_to_sez(range_ecef, obs_lat_rad, obs_lon_east_rad, sez);
+
+    double range_km = sqrt(sez[0] * sez[0] + sez[1] * sez[1]
+                         + sez[2] * sez[2]);
+    if (range_km < 1.0e-9) {
+        /* Observer and satellite coincident — degenerate, but fill
+         * something sane and bail. */
+        out->alt_rad = M_PI * 0.5;
+        out->az_rad  = 0.0;
+        out->range_km = 0.0;
+        out->range_rate_km_s = 0.0;
+        out->above_horizon = 1;
+        out->valid = 1;
+        return SAT_OK;
+    }
+
+    out->alt_rad  = asin(sez[2] / range_km);
+    /* Azimuth from north, increasing east. SEZ has S = -north, so
+     * north-component = -sez[0], east-component = sez[1]. */
+    double az = atan2(sez[1], -sez[0]);
+    if (az < 0.0) az += TWOPI;
+    out->az_rad   = az;
+    out->range_km = range_km;
+    out->above_horizon = (out->alt_rad > 0.0) ? 1 : 0;
+
+    /* Range rate: project the satellite's ECEF velocity onto the line
+     * of sight (observer is fixed in ECEF). */
+    double inv = 1.0 / range_km;
+    double rhat[3] = {
+        range_ecef[0] * inv,
+        range_ecef[1] * inv,
+        range_ecef[2] * inv,
+    };
+    out->range_rate_km_s = sat_v_ecef[0] * rhat[0]
+                         + sat_v_ecef[1] * rhat[1]
+                         + sat_v_ecef[2] * rhat[2];
+
+    out->valid = 1;
+    return SAT_OK;
+}
+
+SatelliteStatus satellite_state_compute(const SatelliteModel *sat,
+                                        double tsince_min,
+                                        double obs_lat_rad,
+                                        double obs_lon_east_rad,
+                                        double obs_alt_km,
+                                        SatelliteState *out) {
+    if (!sat || !out) return SAT_BAD_FIELD;
+    out->valid = 0;
+
+    double r[3], v[3];
+    SatelliteStatus rc = satellite_propagate_teme(sat, tsince_min, r, v);
+    if (rc != SAT_OK) return rc;
+
+    /* tsince is minutes since TLE epoch (JD UT). */
+    double jd = sat->jdsatepoch + tsince_min / 1440.0;
+    return satellite_eci_to_topocentric(r, v, jd,
+                                        obs_lat_rad, obs_lon_east_rad,
+                                        obs_alt_km, out);
 }

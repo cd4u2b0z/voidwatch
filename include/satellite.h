@@ -4,11 +4,17 @@
 /*
  * Hand-built TLE / SGP4 satellite tracking for voidwatch.
  *
- * Phasing (see SATELLITES.md):
- *   1. TLE parser           — this header + parser implementation
- *   2. SGP4 model init      — Phase 2
- *   3. Near-Earth propagate — Phase 3 (validated against Vallado vectors)
- *   4. Deep-space SDP4      — Phase 4 (or refuse with SAT_DEEP_SPACE)
+ * Phase status:
+ *   1. TLE parser           — landed
+ *   2. SGP4 model init      — landed
+ *   3. Near-Earth propagate — landed (validated against Vallado vectors,
+ *                              7e-9 km position agreement)
+ *   4. Deep-space SDP4      — DEFERRED. Voidwatch's intended targets
+ *                              (ISS, Hubble, NOAA, Starlink, Tiangong)
+ *                              are all near-Earth; deep-space TLEs are
+ *                              refused with SAT_DEEP_SPACE. The dscom/
+ *                              dpper/dsinit/dspace body can land later
+ *                              without breaking any of the public API.
  *   5. TEME → look angles   — Phase 5
  *   6. astro integration    — Phase 6
  *
@@ -146,5 +152,47 @@ SatelliteStatus satellite_propagate_teme(const SatelliteModel *model,
                                          double minutes_since_epoch,
                                          double r_km[3],
                                          double v_km_s[3]);
+
+/* ---- Phase 5: TEME → observer look angles --------------------------- */
+
+/* Greenwich mean sidereal time (Vallado eq 3-45 form, SGP4 convention),
+ * radians, [0, 2π). Exposed because tests need it and astro mode may
+ * want to display it. Note this is a slightly different polynomial
+ * than ephem.c's `ephem_local_sidereal_hours` (Meeus 12.4) — keep
+ * SGP4 work on this one for consistency with verification vectors. */
+double satellite_gstime(double jd_ut1);
+
+/*
+ * Convert TEME ECI position + velocity (km, km/s) at jd_ut1 to
+ * observer-centric look angles. Fills out->alt_rad / az_rad /
+ * range_km / range_rate_km_s / above_horizon / valid. r_teme_km and
+ * v_teme_km_s are also copied into out so the caller can carry the
+ * full state in one struct.
+ *
+ * Earth model: WGS-72 ellipsoid (matches SGP4's frame). Polar motion
+ * is set to zero; UT1-UTC corrections (EOP files) are ignored. Look
+ * angles are visual-grade — TEME vectors remain the strict-validation
+ * target. See SATELLITES.md "Earth Model".
+ *
+ * Azimuth convention: north = 0, east = π/2 (clockwise from north).
+ */
+SatelliteStatus satellite_eci_to_topocentric(const double r_teme_km[3],
+                                             const double v_teme_km_s[3],
+                                             double jd_ut1,
+                                             double obs_lat_rad,
+                                             double obs_lon_east_rad,
+                                             double obs_alt_km,
+                                             SatelliteState *out);
+
+/*
+ * Convenience: propagate + topocentric in one call. Computes jd from
+ * the model's epoch and tsince so the caller doesn't have to.
+ */
+SatelliteStatus satellite_state_compute(const SatelliteModel *model,
+                                        double tsince_min,
+                                        double obs_lat_rad,
+                                        double obs_lon_east_rad,
+                                        double obs_alt_km,
+                                        SatelliteState *out);
 
 #endif
