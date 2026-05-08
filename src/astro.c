@@ -26,6 +26,7 @@ typedef struct {
 
 /* Forward decls — used by astro_update before their definitions. */
 static void trails_capture(AstroState *st);
+static unsigned met_rand32(void);     /* used by aurora flare scheduler */
 
 static AstroStyle style_for(EphemBody body) {
     AstroStyle s = { .color = {1,1,1}, .radius_sub = 1.5f,
@@ -1036,10 +1037,33 @@ static void aurora_draw(const AstroState *st, Framebuffer *fb) {
     last = now;
     have_last = 1;
 
+    /* Sub-storm flares: a real auroral arc breathes on minute-scale
+     * timescales — substorms last 15-60 minutes, peak in 5-10. We emulate
+     * that with a Markov-style flare schedule: low chance per frame to
+     * start a new flare, fixed-duration flare at 1.5-2.2× intensity. */
+    static double flare_until = 0.0;
+    static float  flare_mult  = 1.0f;
+    if (t > flare_until) {
+        /* ~1 in 3000 frames at 60fps → ~1 substorm per minute on average. */
+        if ((met_rand32() & 0x7FF) == 0) {
+            float strength = 1.5f + ((float)met_rand32() / 65535.0f) * 0.7f;
+            flare_mult  = strength;
+            flare_until = t + 12.0 + ((float)met_rand32() / 65535.0f) * 28.0;
+        } else {
+            flare_mult = 1.0f;
+        }
+    }
+
+    /* Variety scaling with Kp: storm-level activity (Kp≥7) extends the
+     * bands higher into the sky, reaching toward zenith at Kp 9. At
+     * quiet Kp the band stays near the horizon. */
+    float top_alt_kp_bonus = 0.0f;
+    if (kp > 6.0f) top_alt_kp_bonus = (kp - 6.0f) * 8.0f;
+
     int north = (st->observer.lat_rad >= 0.0);
     double pole_az_rad = north ? 0.0 : M_PI;
 
-    /* Walk az ±60° around the poleward direction, alt 1°..~25°. */
+    /* Walk az ±60° around the poleward direction, alt 1°..~25° + bonus. */
     for (int az_off = -60; az_off <= 60; az_off += 1) {
         double az = pole_az_rad + (double)az_off * DEG2RAD;
         if (az < 0.0)            az += 2.0 * M_PI;
@@ -1049,7 +1073,8 @@ static void aurora_draw(const AstroState *st, Framebuffer *fb) {
         float intensity_base = 0.55f + 0.40f * sinf(phase);
         if (intensity_base < 0.18f) continue;
 
-        float top_alt_deg = 18.0f + 8.0f * sinf(phase * 1.7f + 1.1f);
+        float top_alt_deg = 18.0f + 8.0f * sinf(phase * 1.7f + 1.1f)
+                          + top_alt_kp_bonus;
         if (top_alt_deg < 6.0f) continue;
 
         for (int alt_deg = 1; alt_deg < (int)top_alt_deg; alt_deg++) {
@@ -1058,7 +1083,7 @@ static void aurora_draw(const AstroState *st, Framebuffer *fb) {
             if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
 
             float fall = 1.0f - (float)alt_deg / top_alt_deg;
-            float k = intensity_base * fall * 0.32f * kp_scale;
+            float k = intensity_base * fall * 0.32f * kp_scale * flare_mult;
 
             float tup = (float)alt_deg / top_alt_deg;
             float r = (0.05f + 0.55f * tup) * k;
@@ -1802,6 +1827,66 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
         helio_map_au(cx, cy, r_scale, px, py, &sx, &sy);
         AstroStyle s = style_for((EphemBody)b);
         stamp_body(fb, sx, sy, &s);
+    }
+
+    /* Comet orbital traces — sample 240 points across one full orbital
+     * period (or ~75y for long-period comets). Off-screen samples just
+     * fall outside the projection bounds and get clipped. Halley's
+     * elongated orbit will show as a long ellipse reaching past Neptune;
+     * Hale-Bopp's aphelion at ~370 AU clips entirely off screen, leaving
+     * just the perihelion arc visible. */
+    Color comet_orbit_tint = { 0.40f, 0.50f, 0.60f };
+    for (int i = 0; i < COMET_COUNT; i++) {
+        double period_d;
+        if (comet_elements[i].period_yr > 0.0) {
+            period_d = comet_elements[i].period_yr * 365.25;
+        } else {
+            /* Long-period: sample a 75-year arc around perihelion to
+             * give a useful chunk without spending ages on aphelion. */
+            period_d = 75.0 * 365.25;
+        }
+        double t0 = comet_elements[i].T_jd;
+        if (period_d > 50000.0) period_d = 50000.0;     /* cap */
+        const int N = 240;
+        for (int k = 0; k < N; k++) {
+            double jd_s = t0 - period_d * 0.5
+                        + ((double)k / N) * period_d;
+            double xc, yc, zc;
+            comet_helio_xyz_for(i, jd_s, &xc, &yc, &zc);
+            float sx, sy;
+            helio_map_au(cx, cy, r_scale, xc, yc, &sx, &sy);
+            int ix = (int)floorf(sx + 0.5f);
+            int iy = (int)floorf(sy + 0.5f);
+            if (ix < 0 || iy < 0 || ix >= fb->sub_w || iy >= fb->sub_h)
+                continue;
+            fb_max(fb, ix, iy,
+                   comet_orbit_tint.r * 0.35f,
+                   comet_orbit_tint.g * 0.35f,
+                   comet_orbit_tint.b * 0.35f);
+        }
+    }
+
+    /* Asteroid orbital traces — all in main belt, all easily fit. */
+    Color ast_orbit_tint = { 0.45f, 0.40f, 0.35f };
+    for (int i = 0; i < ASTEROID_COUNT; i++) {
+        double a = asteroid_elements[i].a_au;
+        double period_d = pow(a, 1.5) * 365.25;
+        const int N = 180;
+        for (int k = 0; k < N; k++) {
+            double jd_s = st->jd + ((double)k / N) * period_d;
+            double xa, ya, za;
+            asteroid_helio_xyz_for(i, jd_s, &xa, &ya, &za);
+            float sx, sy;
+            helio_map_au(cx, cy, r_scale, xa, ya, &sx, &sy);
+            int ix = (int)floorf(sx + 0.5f);
+            int iy = (int)floorf(sy + 0.5f);
+            if (ix < 0 || iy < 0 || ix >= fb->sub_w || iy >= fb->sub_h)
+                continue;
+            fb_max(fb, ix, iy,
+                   ast_orbit_tint.r * 0.35f,
+                   ast_orbit_tint.g * 0.35f,
+                   ast_orbit_tint.b * 0.35f);
+        }
     }
 
     /* Comets — current heliocentric positions. Most have aphelions far
