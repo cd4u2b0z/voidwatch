@@ -19,6 +19,17 @@ asteroids — all from real catalogues, all baked into the binary).
 
 > *"Passive sensor feed" aesthetic — ambient, slow, never demands attention.*
 
+### Sandbox
+
+![sandbox demo](docs/sandbox.gif)
+
+### Astro
+
+![astro demo](docs/astro.gif)
+
+*(Astro demo: Charleston SC at real time → speed up 1000× → toggle constellation
+lines → search Halley → switch to heliocentric perspective.)*
+
 [Quick start](#quick-start) · [Modes](#modes) · [Headless / one-shot](#headless--one-shot) · [Keys](#keys) · [Configuration](#configuration) · [Data](CITATIONS.md)
 
 ---
