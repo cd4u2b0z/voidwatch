@@ -2358,6 +2358,18 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
                 speed_buf, sign < 0 ? '-' : '+', oh, om);
     }
 
+    /* Live eclipse magnitude — only printed during the eclipse window.
+     * Sits on row 3 so it doesn't clobber the speed/scrub line. */
+    if (st->view_mode != 1) {
+        double sf = solar_eclipse_factor(st);
+        double lf = lunar_eclipse_factor(st);
+        if (sf > 0.05) {
+            fprintf(out, "\x1b[3;1H  ECLIPSE solar %.2f", sf);
+        } else if (lf > 0.05) {
+            fprintf(out, "\x1b[3;1H  ECLIPSE lunar %.2f", lf);
+        }
+    }
+
     /* Top-right: rotating panel through above-horizon bodies, dwell 6s. */
     int visible[EPHEM_COUNT];
     int n_vis = 0;
@@ -2403,20 +2415,43 @@ void astro_hud(const AstroState *st, FILE *out, int cols, int rows, double t,
         fprintf(out, "\x1b[1;%dH[ %-9s  %3.0f\xC2\xB0 alt %3.0f\xC2\xB0 az ]",
                 x0, ephem_name((EphemBody)sel),
                 p->alt_rad * RAD2DEG, p->az_rad * RAD2DEG);
-        fprintf(out, "\x1b[2;%dH  RA   %02d^h%02d^m",
-                x0, (int)(p->ra_rad * RAD2DEG / 15.0),
-                (int)(fmod(p->ra_rad * RAD2DEG / 15.0, 1.0) * 60.0));
-        fprintf(out, "\x1b[3;%dH  Dec  %+05.1f\xC2\xB0",
-                x0, p->dec_rad * RAD2DEG);
-        fprintf(out, "\x1b[4;%dH  Mag  %+5.2f", x0, p->magnitude);
-        fprintf(out, "\x1b[5;%dH  Dist %5.2f AU", x0, p->distance_au);
-        if (sel == EPHEM_MOON) {
-            fprintf(out, "\x1b[6;%dH  %-15s %3.0f%%",
-                    x0,
-                    astro_moon_phase_name(st->moon_elongation),
-                    st->moon_illum * 100.0);
-            fprintf(out, "\x1b[7;%dH  age %4.1fd",
-                    x0, astro_moon_age_days(st->moon_elongation));
+        if (st->view_mode == 1) {
+            /* Helio panel: RA/Dec are observer-frame, useless here.
+             * Surface heliocentric distance + orbital period progress
+             * (mean anomaly fraction) instead. */
+            double xh = 0, yh = 0, zh = 0;
+            ephem_helio_xyz_for((EphemBody)sel, st->jd, &xh, &yh, &zh);
+            double r_helio = sqrt(xh*xh + yh*yh + zh*zh);
+            /* Period in years from semi-major a (a^1.5); voidwatch
+             * doesn't expose `a` directly so estimate from distance. */
+            double period_yr = 0.0;
+            for (int k = 0; k < helio_orbit_count; k++) {
+                if (helio_orbits[k].body == (EphemBody)sel) {
+                    period_yr = helio_orbits[k].period_days / 365.25;
+                    break;
+                }
+            }
+            fprintf(out, "\x1b[2;%dH  r    %6.3f AU", x0, r_helio);
+            fprintf(out, "\x1b[3;%dH  Dist %6.3f AU", x0, p->distance_au);
+            fprintf(out, "\x1b[4;%dH  Mag  %+5.2f", x0, p->magnitude);
+            if (period_yr > 0)
+                fprintf(out, "\x1b[5;%dH  P    %5.2f yr", x0, period_yr);
+        } else {
+            fprintf(out, "\x1b[2;%dH  RA   %02d^h%02d^m",
+                    x0, (int)(p->ra_rad * RAD2DEG / 15.0),
+                    (int)(fmod(p->ra_rad * RAD2DEG / 15.0, 1.0) * 60.0));
+            fprintf(out, "\x1b[3;%dH  Dec  %+05.1f\xC2\xB0",
+                    x0, p->dec_rad * RAD2DEG);
+            fprintf(out, "\x1b[4;%dH  Mag  %+5.2f", x0, p->magnitude);
+            fprintf(out, "\x1b[5;%dH  Dist %5.2f AU", x0, p->distance_au);
+            if (sel == EPHEM_MOON) {
+                fprintf(out, "\x1b[6;%dH  %-15s %3.0f%%",
+                        x0,
+                        astro_moon_phase_name(st->moon_elongation),
+                        st->moon_illum * 100.0);
+                fprintf(out, "\x1b[7;%dH  age %4.1fd",
+                        x0, astro_moon_age_days(st->moon_elongation));
+            }
         }
     }
     fputs("\x1b[0m", out);

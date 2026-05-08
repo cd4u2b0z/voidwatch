@@ -43,4 +43,12 @@ int headless_year(const Observer *obs, int year, FILE *out);
  * test failed. */
 int headless_validate(FILE *out);
 
+/* `voidwatch --snapshot [cols rows]` — render a single astro frame to
+ * stdout (ANSI truecolor + cursor positioning + braille glyphs) and
+ * exit. No alt-screen, no raw mode, no audio. Useful for piping into
+ * `cat`, saving with `> file.ans`, or feeding a status-bar refresher.
+ * Default 80×40 if dimensions aren't passed. */
+int headless_snapshot(const Observer *obs, time_t now,
+                      int cols, int rows, FILE *out);
+
 #endif

@@ -6,9 +6,14 @@
 #include <time.h>
 
 #include "asteroid.h"
+#include "astro.h"
+#include "audio.h"
 #include "comet.h"
 #include "ephem.h"
+#include "framebuffer.h"
 #include "headless.h"
+#include "palette.h"
+#include "render.h"
 #include "vwconfig.h"
 
 #ifndef M_PI
@@ -654,6 +659,56 @@ int headless_year(const Observer *obs, int year, FILE *out) {
         }
     }
 
+    /* === Greatest elongations (Mercury + Venus) =================== *
+     * Inferior planets reach maximum angular separation from the Sun
+     * a few times per year. Track each one's elongation across the
+     * year and emit local maxima. East = evening visibility, West =
+     * morning visibility. */
+    static const struct { EphemBody body; const char *name; } inf[] = {
+        { EPHEM_MERCURY, "Mercury" },
+        { EPHEM_VENUS,   "Venus"   },
+    };
+    for (size_t k = 0; k < sizeof inf / sizeof inf[0]; k++) {
+        EphemPosition p_prev2, p_prev1;
+        ephem_compute(inf[k].body, jd_start, &p_prev2);
+        EphemPosition s_prev;
+        ephem_compute(EPHEM_SUN, jd_start, &s_prev);
+        double el_prev2 = sep_rad(p_prev2.ra_rad, p_prev2.dec_rad,
+                                  s_prev.ra_rad, s_prev.dec_rad);
+        ephem_compute(inf[k].body, jd_start + 1.0, &p_prev1);
+        ephem_compute(EPHEM_SUN,   jd_start + 1.0, &s_prev);
+        double el_prev1 = sep_rad(p_prev1.ra_rad, p_prev1.dec_rad,
+                                  s_prev.ra_rad, s_prev.dec_rad);
+
+        for (double jd = jd_start + 2.0; jd < jd_end; jd += 1.0) {
+            EphemPosition p, s;
+            ephem_compute(inf[k].body, jd, &p);
+            ephem_compute(EPHEM_SUN,   jd, &s);
+            double el = sep_rad(p.ra_rad, p.dec_rad, s.ra_rad, s.dec_rad);
+
+            /* Local max if previous is greater than both neighbours
+             * AND above 10° (otherwise it's noise during conjunction). */
+            if (el_prev1 > el_prev2 && el_prev1 > el && el_prev1 > 10.0 * DEG2RAD) {
+                /* East/west: east means planet RA > Sun RA (sets after Sun). */
+                double dra = p.ra_rad - s.ra_rad;
+                while (dra >  M_PI) dra -= 2 * M_PI;
+                while (dra < -M_PI) dra += 2 * M_PI;
+                const char *side = (dra > 0) ? "east" : "west";
+                char buf[64];
+                jd_to_local_str(jd - 1.0, buf, sizeof buf);
+                if (n_ev < 200) {
+                    ev[n_ev].jd = jd - 1.0;
+                    snprintf(ev[n_ev].text, sizeof ev[n_ev].text,
+                             "  %s  %s greatest %s elongation (%.0f\xC2\xB0)",
+                             buf, inf[k].name, side, el_prev1 * RAD2DEG);
+                    n_ev++;
+                }
+            }
+            el_prev2 = el_prev1;
+            el_prev1 = el;
+        }
+    }
+
     /* === Major meteor showers ====================================== *
      * Pull peaks straight from the bundled table — DOY → JD via the
      * year's Jan 1. ZHR + name printed for each. */
@@ -745,6 +800,38 @@ int headless_validate(FILE *out) {
     }
     fprintf(out, "\n%d / %d passed.\n", n_pass, n_pass + n_fail);
     return (n_fail == 0) ? 0 : 1;
+}
+
+int headless_snapshot(const Observer *obs, time_t now,
+                      int cols, int rows, FILE *out) {
+    if (cols <= 0) cols = 80;
+    if (rows <= 0) rows = 40;
+    /* Reasonable upper bound — this is a one-shot, but huge frames eat
+     * memory and produce unwieldy output. */
+    if (cols > 400) cols = 400;
+    if (rows > 200) rows = 200;
+
+    Framebuffer fb;
+    if (fb_init(&fb, cols, rows) != 0) return 1;
+
+    AstroState astro = {0};
+    astro.observer           = *obs;
+    astro.show_dso           = 1;
+    astro.show_constellations = 0;
+    astro.show_star_backdrop = 0;     /* clean astronomical view by default */
+
+    astro_update(&astro, now);
+
+    fb_clear(&fb);
+    AudioSnapshot snap = {0};
+    astro_draw(&astro, &fb, cols, rows, &snap);
+    render_flush(&fb, out);
+    astro_labels(&astro, out, cols, rows);
+    astro_hud(&astro, out, cols, rows, 0.0, 1.0, 0.0);
+    fputs("\x1b[0m\n", out);
+
+    fb_free(&fb);
+    return 0;
 }
 
 int headless_next_rise(const Observer *obs, time_t now,

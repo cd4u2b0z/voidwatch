@@ -76,6 +76,7 @@ static void print_help(const char *argv0) {
         "                         seed virtual clock at the given moment;\n"
         "                         applies to --astro and the headless modes\n"
         "  --validate             run internal sanity tests against JPL refs\n"
+        "  --snapshot [cols rows] render one astro frame to stdout and exit\n"
         "\n"
         "  -h, --help             show this help and exit\n"
         "\n"
@@ -101,7 +102,8 @@ int main(int argc, char **argv) {
     int         astro_mode  = 0;
     double      cli_lat     = NAN;
     double      cli_lon     = NAN;
-    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR, HL_VALIDATE } headless = HL_NONE;
+    enum { HL_NONE = 0, HL_TONIGHT, HL_PRINT_STATE, HL_NEXT, HL_YEAR, HL_VALIDATE, HL_SNAPSHOT } headless = HL_NONE;
+    int snap_cols = 80, snap_rows = 40;
     int         json_output = 0;
     time_t      at_time     = 0;
     int         at_set      = 0;
@@ -172,6 +174,20 @@ int main(int argc, char **argv) {
             next_body = argv[++i];
         } else if (strcmp(a, "--validate") == 0) {
             headless = HL_VALIDATE;
+        } else if (strcmp(a, "--snapshot") == 0) {
+            headless = HL_SNAPSHOT;
+            /* Optional next two args: cols rows. Don't consume them if
+             * they're not numeric — could be other flags. */
+            if (i + 2 < argc) {
+                char *e1 = NULL, *e2 = NULL;
+                long c = strtol(argv[i + 1], &e1, 10);
+                long r = strtol(argv[i + 2], &e2, 10);
+                if (e1 && *e1 == '\0' && e2 && *e2 == '\0' && c > 0 && r > 0) {
+                    snap_cols = (int)c;
+                    snap_rows = (int)r;
+                    i += 2;
+                }
+            }
         } else if (strcmp(a, "--at") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "voidwatch: --at requires an ISO date.\n");
@@ -257,6 +273,7 @@ int main(int argc, char **argv) {
             case HL_PRINT_STATE: return headless_print_state(&obs, now, stdout, json_output);
             case HL_NEXT:        return headless_next_rise(&obs, now, next_body, stdout);
             case HL_YEAR:        return headless_year(&obs, year_arg, stdout);
+            case HL_SNAPSHOT:    return headless_snapshot(&obs, now, snap_cols, snap_rows, stdout);
             case HL_VALIDATE:
             case HL_NONE: break;
         }
