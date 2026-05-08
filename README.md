@@ -403,6 +403,27 @@ design rationale are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## License
 
-[MIT](LICENSE) for the voidwatch source. Bundled astronomical catalogues
-(HYG, Stellarium, JPL Horizons / SBDB) keep their upstream terms — see
-[CITATIONS.md](CITATIONS.md) for full attribution.
+voidwatch is a combined work with per-component licensing — read
+[LICENSE](LICENSE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+in full before redistributing. Short summary:
+
+- **Original voidwatch source** — MIT.
+- **Bundled `sky_stars[]` (HYG Database)** — CC BY-SA 2.5
+  (share-alike; redistribute the table portion under the same terms).
+- **Bundled `sky_lines[]` (Stellarium constellation figures)** —
+  GPL-2.0. Because this data compiles into the binary, **the
+  voidwatch binary as distributed is a combined work governed by
+  GPL-2.0**. Source is publicly hosted, which satisfies GPL §3(a).
+- **JPL Horizons/SBDB orbital elements + SGP4 reference algorithm** —
+  US Government public domain.
+- **CelesTrak TLE data** — factual; attribution requested.
+- **Vendored `stb_perlin.h`** — public domain / MIT-0 at the user's
+  option.
+
+Forks that need pure-MIT downstream can replace the Stellarium-derived
+constellation lines with a public-domain or permissively-licensed
+source (one afternoon's work — see THIRD_PARTY_LICENSES.md). The HYG
+star table can stay under CC BY-SA 2.5 as long as attribution +
+share-alike notices survive.
+
+Full data-source attribution lives in [CITATIONS.md](CITATIONS.md).

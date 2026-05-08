@@ -1,3 +1,11 @@
+voidwatch is distributed as a combined work containing original source
+code (MIT) and bundled third-party data that retains its upstream
+license. Read the per-component summary below before redistributing.
+
+================================================================================
+1. ORIGINAL VOIDWATCH SOURCE — MIT
+================================================================================
+
 MIT License
 
 Copyright (c) 2026 Dr. Baklava (cd4u2b0z)
@@ -20,14 +28,114 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
+The MIT licence above covers everything in this repository EXCEPT the
+identifiable bundled-data sections enumerated below.
 
-The MIT license above covers the original voidwatch source code and build
-tooling. Bundled third-party data — the HYG Database (CC BY-SA 2.5), the
-Stellarium "modern" skyculture (GPL-2.0+), JPL Horizons / Small-Body Database
-orbital elements, and any other catalogues compiled into the binary — retains
-its upstream license. See CITATIONS.md for full attribution.
+================================================================================
+2. BUNDLED STAR CATALOG — CC BY-SA 2.5  (HYG Database v3.6.1)
+================================================================================
 
-The vendored stb_perlin.h is released by Sean Barrett into the public domain
-(or under the MIT-0 license at the user's option) and carries its own header
-notice.
+The `sky_stars[]` array in `src/skydata.c` is derived from the HYG Database
+v3.6.1, © David Nash, distributed under the Creative Commons Attribution-
+ShareAlike 2.5 licence:
+
+    https://creativecommons.org/licenses/by-sa/2.5/
+
+HYG itself aggregates data from the Hipparcos catalogue (ESA, factual /
+public), the Yale Bright Star Catalog (BSC5, factual / public), and the
+Gliese Catalog of Nearby Stars (RECONS, factual / public). voidwatch uses
+HYG's HIP id, RA / Dec / V-magnitude / spectral class / IAU proper-name
+columns.
+
+Changes made (per CC BY-SA 2.5 §3(b) "indicate changes"):
+- Filtered to V magnitude <= 6.5 (naked-eye limit).
+- Reformatted into the C `SkyStar` struct layout used by voidwatch.
+- Spectral class column reduced to a single character.
+
+The `sky_stars[]` data is redistributed under CC BY-SA 2.5. Anyone
+redistributing voidwatch must keep the HYG attribution and the CC BY-SA 2.5
+notice intact for that data section. Source URL of HYG:
+https://github.com/astronexus/HYG-Database
+
+================================================================================
+3. BUNDLED CONSTELLATION LINES — GPL-2.0  (Stellarium "modern_iau" skyculture)
+================================================================================
+
+The `sky_lines[]` array in `src/skydata.c` is derived from Stellarium's
+`skycultures/modern_iau/index.json`. Stellarium is licensed under the GNU
+General Public License version 2:
+
+    https://github.com/Stellarium/stellarium/blob/master/COPYING
+
+Per GPL-2.0 §2, the *combined work* (the voidwatch binary linked together
+with this constellation-line data) is therefore distributed under GPL-2.0.
+That means anyone receiving a voidwatch binary has the rights granted by
+GPL-2.0 over the binary, including the right to receive the corresponding
+source code. voidwatch's source code is publicly hosted; that satisfies the
+"source must accompany the binary" requirement.
+
+Changes made: the polylines were transformed from JSON arrays of HIP
+identifiers into pairs of indices into voidwatch's filtered star table.
+Constellations whose stars all fall below the V≤6.5 magnitude cut are
+omitted.
+
+If you want to redistribute voidwatch under MIT-only (without the GPL
+contamination), replace `sky_lines[]` and the Stellarium import in
+`tools/gen_skydata.py` with a public-domain or permissively-licensed
+constellation-line source.
+
+================================================================================
+4. JPL HORIZONS / SBDB ORBITAL ELEMENTS — public domain (US Government work)
+================================================================================
+
+The bundled comet, asteroid, and planet orbital elements come from NASA
+JPL's HORIZONS system and Small-Body Database. As US Government work,
+these are in the public domain. See CITATIONS.md.
+
+================================================================================
+5. CelesTrak TLE DATA — factual / attribution requested
+================================================================================
+
+The bundled near-Earth satellite TLEs in `satellite_elements[]` (ISS,
+HST, NOAA 19, CSS Tianhe) were fetched from CelesTrak's GP query API.
+Two-line element sets are factual numeric data derived from US Government
+tracking; CelesTrak does not assert copyright on the numbers but requests
+attribution for redistributors. See CITATIONS.md.
+
+================================================================================
+6. VENDORED STB_PERLIN.H — public domain / MIT-0
+================================================================================
+
+`include/stb_perlin.h` is by Sean Barrett, dual-licensed as public domain
+(unlicense) or MIT-0 at the recipient's option. The file's own header
+notice governs.
+
+================================================================================
+7. SGP4 ALGORITHM — public domain
+================================================================================
+
+The hand-built SGP4 propagator in `src/satellite.c` is voidwatch original
+code, but the algorithm itself is public-domain (Hoots & Roehrich 1980,
+Spacetrack Report No. 3) with corrections published by Vallado et al.
+(AIAA 2006-6753) under terms that explicitly permit reuse. The voidwatch
+implementation is MIT-licensed under §1 above.
+
+================================================================================
+SUMMARY
+================================================================================
+
+If you redistribute the voidwatch BINARY, you are redistributing a combined
+work whose effective licence is GPL-2.0 (the strongest copyleft in the
+combination). Provide source access. Keep HYG / Stellarium attribution
+intact.
+
+If you redistribute the SOURCE TREE without modification, the per-component
+licences above govern each component independently.
+
+If you fork voidwatch and want a clean MIT-only result, replace the
+Stellarium-derived `sky_lines[]` with a public-domain or MIT-compatible
+constellation-line source. The HYG star table can stay as long as the
+CC BY-SA 2.5 attribution + share-alike notice survive.
+
+For the full text of CC BY-SA 2.5 and GPL-2.0, see THIRD_PARTY_LICENSES.md
+or the upstream URLs listed above.
