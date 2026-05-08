@@ -475,9 +475,15 @@ static void stars_draw(const AstroState *st, Framebuffer *fb) {
 
 static void constellations_draw(const AstroState *st, Framebuffer *fb) {
     /* Dotted line — sample the segment at fixed parametric steps. Density
-     * scales with screen length. */
-    Color tint = { 0.45f, 0.55f, 0.70f };  /* dim cool cyan */
-    float intensity = 0.10f;
+     * scales with screen length.
+     *
+     * Intensity must clear the background-star floor (mag_to_intensity
+     * clamps to 0.10) plus the LUM_THRESHOLD + gamma combo (~0.06 in
+     * linear after gamma 1.18), or every line dot near a star gets
+     * masked by fb_max. 0.55 gives a clearly readable cyan dot that
+     * still reads "dotted line" rather than "solid bar". */
+    Color tint = { 0.55f, 0.75f, 1.00f };
+    float intensity = 0.55f;
 
     for (int i = 0; i < sky_lines_count; i++) {
         const SkyStar *a = &sky_stars[sky_lines[i].a];
