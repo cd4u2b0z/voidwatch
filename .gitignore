@@ -6,3 +6,4 @@ AGENTS.md
 GEMINI.md
 .cache/
 compile_commands.json
+tools/data/

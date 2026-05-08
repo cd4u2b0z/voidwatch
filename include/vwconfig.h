@@ -27,6 +27,7 @@ typedef struct {
     float fb_decay;              /* exponential decay factor per frame */
 
     /* [astro] */
+    float star_mag_cutoff;       /* hide stars dimmer than this         */
     float comet_mag_cutoff;      /* hide comets dimmer than this        */
     float asteroid_mag_cutoff;   /* hide asteroids dimmer than this     */
 

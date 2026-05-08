@@ -427,8 +427,10 @@ static int project_sky(const AstroState *st, Framebuffer *fb,
 }
 
 static void stars_draw(const AstroState *st, Framebuffer *fb) {
+    float mag_cutoff = g_config.star_mag_cutoff;
     for (int i = 0; i < sky_stars_count; i++) {
         const SkyStar *s = &sky_stars[i];
+        if (s->mag > mag_cutoff) continue;
         double ra  = s->ra_h * (M_PI / 12.0);
         double dec = s->dec_deg * DEG2RAD;
         float  sx, sy;

@@ -10,6 +10,7 @@ VWConfig g_config;
 
 void vwconfig_init_defaults(void) {
     g_config.fb_decay              = FB_DECAY;
+    g_config.star_mag_cutoff       = 6.5f;
     g_config.comet_mag_cutoff      = 8.0f;
     g_config.asteroid_mag_cutoff   = 9.5f;
     g_config.gravity_g             = GRAVITY_G;
@@ -33,6 +34,7 @@ static void apply_kv(const char *key, const char *value) {
     if (end == value) return;             /* not a number — skip       */
 
     if      (strcmp(key, "visual.fb_decay")             == 0) g_config.fb_decay            = (float)v;
+    else if (strcmp(key, "astro.star_mag_cutoff")       == 0) g_config.star_mag_cutoff     = (float)v;
     else if (strcmp(key, "astro.comet_mag_cutoff")      == 0) g_config.comet_mag_cutoff    = (float)v;
     else if (strcmp(key, "astro.asteroid_mag_cutoff")   == 0) g_config.asteroid_mag_cutoff = (float)v;
     else if (strcmp(key, "sandbox.gravity_g")           == 0) g_config.gravity_g           = (float)v;
