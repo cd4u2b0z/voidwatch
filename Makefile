@@ -68,6 +68,9 @@ tests/test_nbody: tests/test_nbody.c src/body.o src/vwconfig.o src/palette.o
 tests/test_json: tests/test_json.c
 	$(CC) $(CFLAGS) $^ -o $@
 
+tests/test_tle: tests/test_tle.c src/satellite.o
+	$(CC) $(CFLAGS) $^ -o $@ -lm
+
 test: $(TEST_BINS) $(BIN)
 	@set -e; \
 	pass=0; fail=0; \

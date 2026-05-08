@@ -11,4 +11,5 @@ tests/test_framebuffer
 tests/test_projection
 tests/test_nbody
 tests/test_json
+tests/test_tle
 tests/golden/.actual.json
