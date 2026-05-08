@@ -71,6 +71,18 @@ static double alt_for_comet(const Observer *obs, int idx, time_t t) {
     return tmp.alt_rad;
 }
 
+static double alt_for_satellite(const Observer *obs, int idx, time_t t) {
+    /* SGP4 propagation + topocentric look angle. Returns -π so an
+     * invalid / stale entry surfaces as definitively below horizon
+     * to the rise-finder rather than a NaN sentinel. */
+    if (idx < 0 || idx >= SATELLITE_COUNT) return -M_PI;
+    double jd = ephem_julian_day_from_unix(t);
+    SatelliteState st[SATELLITE_COUNT];
+    satellite_compute_all(jd, obs->lat_rad, obs->lon_rad, 0.0, st);
+    if (!st[idx].valid) return -M_PI;
+    return st[idx].alt_rad;
+}
+
 static double alt_for_asteroid(const Observer *obs, int idx, time_t t) {
     AsteroidState states[ASTEROID_COUNT];
     double jd = ephem_julian_day_from_unix(t);
@@ -89,11 +101,14 @@ typedef double (*alt_fn)(const Observer *obs, int idx, time_t t);
 /* Coarse scan + bisection. Returns 0 + writes `*found_t` if a sign
  * change of the given direction is located within `horizon_seconds`,
  * else returns -1. Direction: +1 means "alt crosses zero going up"
- * (rise), -1 means going down (set). */
+ * (rise), -1 means going down (set). `step_seconds` is the coarse
+ * sampling interval — 600 (10 min) for slow bodies, ~30 for satellites
+ * whose passes are minutes long. */
 static int search_zero_crossing(const Observer *obs, alt_fn fn, int idx,
                                 time_t start, long horizon_seconds,
+                                long step_seconds,
                                 int direction, time_t *found_t) {
-    const long step = 600;             /* 10 minutes coarse */
+    const long step = step_seconds > 0 ? step_seconds : 600;
     double prev = fn(obs, idx, start);
     for (long s = step; s <= horizon_seconds; s += step) {
         time_t t = start + s;
@@ -124,16 +139,23 @@ static int search_zero_crossing(const Observer *obs, alt_fn fn, int idx,
     return -1;
 }
 
-/* Nearest-future rise (alt crosses 0 going up). */
+/* Nearest-future rise (alt crosses 0 going up). 0 step → default 600s. */
 static int find_next_rise(const Observer *obs, alt_fn fn, int idx,
                           time_t now, long horizon_seconds, time_t *out_t) {
-    return search_zero_crossing(obs, fn, idx, now, horizon_seconds, +1, out_t);
+    return search_zero_crossing(obs, fn, idx, now, horizon_seconds, 600, +1, out_t);
+}
+
+static int find_next_rise_step(const Observer *obs, alt_fn fn, int idx,
+                               time_t now, long horizon_seconds,
+                               long step_seconds, time_t *out_t) {
+    return search_zero_crossing(obs, fn, idx, now, horizon_seconds,
+                                step_seconds, +1, out_t);
 }
 
 /* Nearest-future set (alt crosses 0 going down). */
 static int find_next_set(const Observer *obs, alt_fn fn, int idx,
                          time_t now, long horizon_seconds, time_t *out_t) {
-    return search_zero_crossing(obs, fn, idx, now, horizon_seconds, -1, out_t);
+    return search_zero_crossing(obs, fn, idx, now, horizon_seconds, 600, -1, out_t);
 }
 
 /* ---- Active meteor shower ------------------------------------------- *
@@ -198,7 +220,31 @@ typedef enum {
     LOOKUP_PLANET,
     LOOKUP_COMET,
     LOOKUP_ASTEROID,
+    LOOKUP_SATELLITE,
 } LookupKind;
+
+/* Match `name` against any comma-separated alias in a satellite's
+ * alias list (case-insensitive). */
+static int alias_match(const char *aliases, const char *name) {
+    if (!aliases || !*name) return 0;
+    size_t need = strlen(name);
+    const char *p = aliases;
+    while (*p) {
+        const char *q = p;
+        while (*q && *q != ',') q++;
+        size_t len = (size_t)(q - p);
+        if (len == need) {
+            int eq = 1;
+            for (size_t i = 0; i < len; i++) {
+                if (tolower((unsigned char)p[i]) !=
+                    tolower((unsigned char)name[i])) { eq = 0; break; }
+            }
+            if (eq) return 1;
+        }
+        p = (*q == ',') ? q + 1 : q;
+    }
+    return 0;
+}
 
 typedef struct {
     LookupKind  kind;
@@ -228,6 +274,18 @@ static BodyLookup lookup_body(const char *name) {
         if (strieq(asteroid_elements[i].name, name)) {
             r.kind = LOOKUP_ASTEROID; r.idx = i;
             r.display = asteroid_elements[i].name;
+            return r;
+        }
+    }
+    /* Satellites: match name, short name, or any comma-separated alias
+     * (the catalog number is one of the aliases). */
+    for (int i = 0; i < SATELLITE_COUNT; i++) {
+        const SatelliteElements *e = &satellite_elements[i];
+        if (strieq(e->name, name)
+         || strieq(satellite_short_name(i), name)
+         || alias_match(e->aliases, name)) {
+            r.kind = LOOKUP_SATELLITE; r.idx = i;
+            r.display = e->name;
             return r;
         }
     }
@@ -930,30 +988,42 @@ int headless_next_rise(const Observer *obs, time_t now,
     }
 
     /* If currently above the horizon, look ahead for the next set then
-     * rise after that. Otherwise look for the next rise from now. */
+     * rise after that. Otherwise look for the next rise from now.
+     *
+     * Satellites need a much tighter coarse step (LEO passes are
+     * minutes long; a 10-minute slow-body step would step right over
+     * them) and a shorter horizon (LEO has multiple passes per day,
+     * 7 days is overkill but cheap). */
     alt_fn fn = NULL;
     switch (b.kind) {
-        case LOOKUP_PLANET:   fn = alt_for_planet;   break;
-        case LOOKUP_COMET:    fn = alt_for_comet;    break;
-        case LOOKUP_ASTEROID: fn = alt_for_asteroid; break;
-        case LOOKUP_NONE:     return 2;
+        case LOOKUP_PLANET:    fn = alt_for_planet;    break;
+        case LOOKUP_COMET:     fn = alt_for_comet;     break;
+        case LOOKUP_ASTEROID:  fn = alt_for_asteroid;  break;
+        case LOOKUP_SATELLITE: fn = alt_for_satellite; break;
+        case LOOKUP_NONE:      return 2;
     }
-    double now_alt = fn(obs, b.idx, now);
+    int      is_sat       = (b.kind == LOOKUP_SATELLITE);
+    long     step_seconds = is_sat ? 30L : 600L;
+    long     horizon      = is_sat ? 7L * 86400L : 30L * 86400L;
+    long     nudge        = is_sat ? 5L : 60L;
+    double   now_alt = fn(obs, b.idx, now);
 
-    const long thirty_days = 30L * 86400L;
     time_t search_from = now;
     if (now_alt > 0.0) {
         time_t set_t;
-        if (find_next_set(obs, fn, b.idx, now, thirty_days, &set_t) == 0) {
-            search_from = set_t + 60;        /* nudge past horizon */
+        if (search_zero_crossing(obs, fn, b.idx, now, horizon,
+                                 step_seconds, -1, &set_t) == 0) {
+            search_from = set_t + nudge;     /* clear horizon */
         }
     }
 
     time_t rise_t;
-    if (find_next_rise(obs, fn, b.idx, search_from, thirty_days, &rise_t) != 0) {
-        fprintf(out, "%s: no rise within 30 days "
-                     "(maybe circumpolar above or below for your latitude).\n",
-                b.display);
+    if (find_next_rise_step(obs, fn, b.idx, search_from, horizon,
+                            step_seconds, &rise_t) != 0) {
+        fprintf(out, "%s: no rise within %ld days "
+                     "(maybe circumpolar above or below for your latitude%s).\n",
+                b.display, horizon / 86400L,
+                is_sat ? ", or stale TLE" : "");
         return 0;
     }
 

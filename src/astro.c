@@ -1823,6 +1823,21 @@ static double alt_search_dso(const Observer *obs, int idx, time_t t) {
     return asin(sin_alt);
 }
 
+static double alt_search_satellite(const Observer *obs, int idx, time_t t) {
+    /* SGP4 propagation + topocentric look angles. compute_all does all
+     * 4 bundled satellites; the wasted work for the other 3 is cheap
+     * and the public API caches models. Returns -π/2 (definitively
+     * below horizon) for invalid / stale entries — keeps the
+     * rise-finder bisection well-behaved instead of returning a NaN
+     * sentinel. */
+    if (idx < 0 || idx >= SATELLITE_COUNT) return -M_PI;
+    double jd = ephem_julian_day_from_unix(t);
+    SatelliteState states[SATELLITE_COUNT];
+    satellite_compute_all(jd, obs->lat_rad, obs->lon_rad, 0.0, states);
+    if (!states[idx].valid) return -M_PI;
+    return states[idx].alt_rad;
+}
+
 typedef double (*search_alt_fn)(const Observer *obs, int idx, time_t t);
 
 int astro_search_body(const AstroState *st, const char *name,
@@ -1873,53 +1888,46 @@ int astro_search_body(const AstroState *st, const char *name,
     }
     if (kind == 0) return -1;
 
-    /* Satellites short-circuit the rise-search: return immediately with
-     * a zero scrub. The caller arms track, and the cursor will follow
-     * the satellite while it's above the horizon. Implementing a proper
-     * pass predictor (10-30s coarse step + AOS/LOS bisection) is on
-     * the roadmap but isn't a Phase 6 acceptance gate. */
-    if (kind == 5) {
-        if (display && display_out) snprintf(display_out, cap, "%s", display);
-        if (out_kind) *out_kind = kind;
-        if (out_idx)  *out_idx  = idx;
-        if (out_seconds) *out_seconds = 0.0;
-        return 0;
-    }
-
     if (display && display_out) {
         snprintf(display_out, cap, "%s", display);
     }
     if (out_kind) *out_kind = kind;
     if (out_idx)  *out_idx  = idx;
 
-    /* Coarse 10-minute scan + bisection. Mirrors headless's
-     * search_zero_crossing but specialised for "next rise" only. */
+    /* Coarse-scan + bisection. step / horizon are kind-dependent:
+     * planets, comets, asteroids, DSOs all share slow-body conventions
+     * (10-min step, 30-day horizon). Satellites need much tighter
+     * sampling — LEO passes are ~6 minutes long, so a 10-min coarse
+     * step would step over them entirely. Use 30 s + 7-day horizon
+     * for satellites instead. */
     search_alt_fn fn = (kind == 1) ? alt_search_planet
                      : (kind == 2) ? alt_search_comet
                      : (kind == 3) ? alt_search_asteroid
-                     :               alt_search_dso;
+                     : (kind == 4) ? alt_search_dso
+                     :               alt_search_satellite;
+    const long step    = (kind == 5) ? 30L           : 600L;
+    const long horizon = (kind == 5) ? 7L * 86400L   : 30L * 86400L;
     /* Convert st->jd back to unix time for the walker. */
     time_t now = (time_t)((st->jd - 2440587.5) * 86400.0);
     /* If body is currently above horizon, push past its next set first
      * so we land on a *rise* not the present moment. */
     double cur = fn(&st->observer, idx, now);
     if (cur > 0.0) {
-        const long step = 600;
-        const long horizon = 30L * 86400L;
         double prev = cur;
         for (long s = step; s <= horizon; s += step) {
             time_t t = now + s;
             double a = fn(&st->observer, idx, t);
             if (prev > 0.0 && a <= 0.0) {
-                now = t + 60;     /* nudge past horizon */
+                /* Nudge to clear the horizon. step seconds is enough
+                 * for slow bodies; satellites need just a couple of
+                 * seconds since they cross fast. */
+                now = t + ((kind == 5) ? 5 : 60);
                 break;
             }
             prev = a;
         }
     }
     /* Now search forward for next rise. */
-    const long step = 600;
-    const long horizon = 30L * 86400L;
     double prev = fn(&st->observer, idx, now);
     for (long s = step; s <= horizon; s += step) {
         time_t t = now + s;
