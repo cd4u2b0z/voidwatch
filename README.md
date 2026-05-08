@@ -2,6 +2,7 @@
 
 ![C11](https://img.shields.io/badge/C-11-00599C?style=flat&logo=c&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
+![License](https://img.shields.io/badge/license-MIT-brightgreen)
 ![Lines](https://img.shields.io/badge/lines-6.4k%20+%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
 ![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium-cyan)
@@ -311,4 +312,6 @@ Sources are fully cited in [CITATIONS.md](CITATIONS.md).
 
 ## License
 
-Not yet licensed. If that matters to you, ask.
+[MIT](LICENSE) for the voidwatch source. Bundled astronomical catalogues
+(HYG, Stellarium, JPL Horizons / SBDB) keep their upstream terms — see
+[CITATIONS.md](CITATIONS.md) for full attribution.
