@@ -55,6 +55,12 @@ typedef struct {
      * the ecliptic"). Toggle with `m`. */
     int            view_mode;
 
+    /* Helio-mode-only: parallax star backdrop (the sandbox starfield
+     * pressed into double duty). Decorative, not real positions. Default
+     * on, toggle with `s`. Geo mode ignores this — its sky is the real
+     * HYG catalogue. */
+    int            show_helio_stars;
+
     /* Trail ring buffers per body. */
     TrailSample    trails[EPHEM_COUNT][ASTRO_TRAIL_LEN];
     int            trail_head[EPHEM_COUNT];

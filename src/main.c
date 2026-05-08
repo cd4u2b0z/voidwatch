@@ -81,7 +81,8 @@ static void print_help(const char *argv0) {
         "Runtime keys: h toggle HUD, ? help overlay, q/Esc quit.\n"
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
         "              g grid, l constellation lines, t trails,\n"
-        "              m geo/helio view, c cursor (hjkl, Esc).\n",
+        "              m geo/helio view, s helio star backdrop,\n"
+        "              c cursor (hjkl, Esc).\n",
         argv0);
 }
 
@@ -199,6 +200,7 @@ int main(int argc, char **argv) {
     }
 
     AstroState astro = {0};
+    astro.show_helio_stars = 1;        /* on by default in helio mode */
     if (astro_mode) {
         int fb_loc = 0;
         if (location_resolve(cli_lat, cli_lon, &astro.observer, &fb_loc) != 0) {
@@ -280,6 +282,9 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && (k == 'm' || k == 'M')) {
                 astro.view_mode = !astro.view_mode;
+            }
+            else if (astro_mode && (k == 's' || k == 'S')) {
+                astro.show_helio_stars = !astro.show_helio_stars;
             }
             else if (astro_mode && (k == 'c' || k == 'C')) {
                 astro.cursor_active = !astro.cursor_active;
@@ -422,6 +427,14 @@ int main(int argc, char **argv) {
             particle_draw(&pa, &fb, rcam_x, rcam_y);
         }
         if (astro_mode) {
+            /* Helio backdrop: optional decorative parallax stars. The
+             * sandbox starfield doesn't represent real positions but it
+             * fills the empty solar-system frame with a pleasing field
+             * of dim points. Geo mode keeps a clean black backdrop —
+             * the HYG catalogue is the sky there. */
+            if (astro.view_mode == 1 && astro.show_helio_stars) {
+                starfield_draw(&sf, &fb, rcam_x, rcam_y, t_total, &snap);
+            }
             astro_draw(&astro, &fb, cols, rows, &snap);
         } else {
             body_draw(&bs, &fb, rcam_x, rcam_y, &snap);
