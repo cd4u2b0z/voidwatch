@@ -1,11 +1,14 @@
 # voidwatch
 
+![Version](https://img.shields.io/badge/version-1.0.0-orange)
 ![C11](https://img.shields.io/badge/C-11-00599C?style=flat&logo=c&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Lines](https://img.shields.io/badge/lines-6.4k%20+%208870%20stars-lightgrey)
+![Lines](https://img.shields.io/badge/lines-7k%20+%208870%20stars-lightgrey)
 ![Modes](https://img.shields.io/badge/modes-sandbox%20%2B%20astro-blue)
-![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium-cyan)
+![Perspectives](https://img.shields.io/badge/perspectives-geo%20%2B%20helio-blueviolet)
+![Catalog](https://img.shields.io/badge/sky-HYG%20v3.6.1%20%2B%20Stellarium%20%2B%2030%20DSOs-cyan)
+![Tests](https://img.shields.io/badge/--validate-5%2F5%20passing-success)
 ![No deps](https://img.shields.io/badge/runtime%20deps-libc%20libm%20alsa%20fftw-success)
 
 Terminal space observatory. Two flavours: a phosphorescent **N-body
@@ -150,8 +153,11 @@ For shell scripting, status bars, and "what's up tonight?":
 voidwatch --tonight              # text summary (sample above)
 voidwatch --print-state          # text columns
 voidwatch --print-state --json   # JSON for piping
-voidwatch --next mars            # "Mars rises 2026-05-08 05:16 EDT  (in 9h26m)"
-voidwatch --next vesta           # works for any bundled body name
+voidwatch --next mars            # "Mars rises 2026-05-08 05:16 EDT (in 9h26m)"
+voidwatch --year 2026            # full annual almanac (sorted)
+voidwatch --validate             # internal sanity tests vs JPL refs
+voidwatch --snapshot 200 60      # render one frame as ANSI to stdout
+voidwatch --astro --at 2061-07-28  # virtual clock starts at Halley's perihelion
 ```
 
 These bypass terminal init, audio init, and the render loop — pure
@@ -160,6 +166,10 @@ compute + print + exit. Pipe into `jq`:
 ```bash
 voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
 ```
+
+`--at <YYYY-MM-DD[Thh:mm:ss]>` works with any of these *and* with
+`--astro` itself — handy for visiting historical or future skies
+(2024 Great American Eclipse, 1997 Hale-Bopp, 2061 Halley return).
 
 ---
 
@@ -174,13 +184,16 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   + / -     speed up / slow down (10x)
   0         reset speed + scrub
   , / .     scrub time -1h / +1h
+  j         jump to next event (eclipse / conjunction / shower)
+  /         search: type a body name, Enter jumps + auto-tracks
   m         toggle geo / helio view
   s         toggle decorative star backdrop (geo + helio)
   g         toggle alt-az grid
   l         toggle constellation lines
   d         toggle deep-sky objects (M31, M42, …)
   a         toggle aurora
-  t         toggle planet trails
+  t         toggle planet trails (lowercase)
+  T         toggle track mode (uppercase — cursor follows nearest body)
   c         toggle object cursor (then hjkl, Esc to exit)
 ```
 
@@ -303,28 +316,43 @@ make
 
 ## Status
 
-- **Sandbox mode** — phases 1-5 LANDED (starfield, parallax, drift, N-body
-  gravity, phosphorescent trails, Perlin nebula, particle FX, audio
-  reactivity, HUD). Three exotic body kinds (neutron star, black hole,
-  nebula core) ride on stable orbits.
-- **Astro mode** — Tiers 1-4c LANDED (bundled bright stars, constellations,
-  cardinal markers, Milky Way, moon phases, refraction, extinction,
-  twilight, body trails, Galilean moons, Saturn rings, sky grid, object
-  cursor, meteor showers, eclipses, comets, asteroids).
-- **Tier 5** — HYG v3.6.1 + Stellarium 88 constellations + 30 named
-  Messier/NGC DSOs + aurora effect all LANDED. GeoNames city lookup
-  optional, still open.
-- **Heliocentric view** — LANDED (`m` toggle). Top-down solar system
-  with sqrt-scaled distances and orbital path traces. Comets/asteroids
-  in helio + helio-specific scan readout still open.
-- **HUD event log** — LANDED. Meteor shower / eclipse activity now
-  announces on transition.
-- **Headless** — `--tonight`, `--print-state`, `--next` LANDED.
-- **Runtime config (TOML subset)** — LANDED. Inotify hot-reload still
-  open.
+**v1.0.0 — feature-complete release.** Everything below is shipped:
 
-Open polish: track mode (`T`), `--validate` self-test, in-program
-search, inotify hot-reload, audio reactivity in astro mode.
+- **Sandbox mode** — N-body simulation with phosphorescent trails,
+  Perlin nebulae, particle FX (5 kinds), audio-reactive supernovae,
+  three exotic body kinds (neutron star, black hole, nebula core).
+- **Astro mode** — real ephemeris with two perspectives (`m`):
+  - **Geocentric**: 8870 stars (HYG v3.6.1), 88 IAU constellations
+    (Stellarium), Sun + Moon + 8 planets (Meeus), Milky Way band,
+    refraction + airmass extinction + twilight tint, sporadic meteors
+    (~8/hr) + 9 named showers with per-shower colour & velocity,
+    solar/lunar eclipses with live magnitude, planet-planet
+    conjunctions, Moon-planet close passes, 30 named DSOs (M31, M42,
+    M45, M57, Pleiades, Omega Centauri, etc.), aurora with Kp gating
+    and substorm flares.
+  - **Heliocentric**: top-down solar system. Sun-centred, all 8 planets
+    + Earth + 6 comets + 5 asteroids, full orbital traces, sqrt-scaled
+    distances, decorative parallax backdrop, helio-specific scan
+    readout (heliocentric distance + orbital period).
+- **HUD event log** — narrates shower activity, eclipse begin/peak/end,
+  conjunctions, Moon close passes on transition.
+- **Headless modes** — `--tonight`, `--print-state [--json]`,
+  `--next <body>`, `--year <year>` (full annual almanac), `--snapshot`,
+  `--validate` (5/5 against Meeus's published worked examples).
+- **Interactive controls** — time scrub (`+`/`-`/`,`/`.`/`0`), event
+  jump (`j`), search & auto-track (`/`), track mode (`T`), cursor pick
+  (`c` + hjkl), 8 toggle keys for grid/lines/DSOs/aurora/trails/
+  backdrop/perspectives.
+- **Configuration** — runtime TOML knobs (`~/.config/voidwatch/config.toml`),
+  wallust-driven theming (`~/.config/voidwatch/theme.conf`), location
+  resolution (`--lat/--lon` → file → env → fallback), `--at <iso-date>`
+  for arbitrary virtual time.
+
+Open (low priority polish): lunar standstills, eclipse path-of-totality,
+inotify hot-reload, audio reactivity in astro, GeoNames cities.
+
+Deferred indefinitely: satellites (TLE/SGP4 conflicts with no-runtime-
+data-files posture).
 
 Sources are fully cited in [CITATIONS.md](CITATIONS.md).
 

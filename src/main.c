@@ -78,6 +78,7 @@ static void print_help(const char *argv0) {
         "  --validate             run internal sanity tests against JPL refs\n"
         "  --snapshot [cols rows] render one astro frame to stdout and exit\n"
         "\n"
+        "  -V, --version          print version and exit\n"
         "  -h, --help             show this help and exit\n"
         "\n"
         "Astro mode location resolves in this order:\n"
@@ -235,6 +236,9 @@ int main(int argc, char **argv) {
             }
             headless  = HL_YEAR;
             year_arg  = (int)y;
+        } else if (strcmp(a, "--version") == 0 || strcmp(a, "-V") == 0) {
+            printf("voidwatch %s\n", VOIDWATCH_VERSION);
+            return 0;
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
             print_help(argv[0]);
             return 0;

@@ -1,6 +1,8 @@
 #ifndef VOIDWATCH_CONFIG_H
 #define VOIDWATCH_CONFIG_H
 
+#define VOIDWATCH_VERSION "1.0.0"
+
 typedef struct { float r, g, b; } Color;
 
 #define TARGET_FPS 60
