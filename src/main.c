@@ -411,17 +411,26 @@ int main(int argc, char **argv) {
         else if (g_config.fb_decay < 0.999f) fb_decay(&fb, g_config.fb_decay);
         else                                 fb_clear(&fb);
 
-        nebula_draw(&fb, rcam_x, rcam_y, t_total, &snap);
-        starfield_draw(&sf, &fb, rcam_x, rcam_y, t_total, &snap);
-        particle_draw(&pa, &fb, rcam_x, rcam_y);
+        /* Sandbox-only background layers. Astro mode owns its full
+         * composite (HYG stars, MW, twilight, etc. for geo; clean black
+         * for helio) — letting the parallax starfield + Perlin nebula
+         * leak through would just produce flickering noise behind the
+         * real ephemeris. */
+        if (!astro_mode) {
+            nebula_draw(&fb, rcam_x, rcam_y, t_total, &snap);
+            starfield_draw(&sf, &fb, rcam_x, rcam_y, t_total, &snap);
+            particle_draw(&pa, &fb, rcam_x, rcam_y);
+        }
         if (astro_mode) {
             astro_draw(&astro, &fb, cols, rows, &snap);
         } else {
             body_draw(&bs, &fb, rcam_x, rcam_y, &snap);
         }
         render_flush(&fb, stdout);
-        starfield_spikes(&sf, stdout, cols, rows,
-                         rcam_x, rcam_y, t_total, &snap);
+        if (!astro_mode) {
+            starfield_spikes(&sf, stdout, cols, rows,
+                             rcam_x, rcam_y, t_total, &snap);
+        }
         if (astro_mode) {
             astro_labels(&astro, stdout, cols, rows);
         }
