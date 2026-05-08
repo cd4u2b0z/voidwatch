@@ -108,17 +108,21 @@ separation gating), 9 annual **meteor showers** (DOY-driven activity
 profile), 6 bundled **comets** (1P/Halley, 2P/Encke, 109P/Swift-Tuttle,
 21P/Giacobini-Zinner, 67P/Churyumov-Gerasimenko, Hale-Bopp) propagated
 two-body Keplerian, 5 bundled **asteroids** (Ceres, Pallas, Vesta, Juno,
-Iris). Saturn rings tilt with the 29.46-yr ring-plane cycle. Galilean
-moons orbit Jupiter visibly. The HUD event log narrates shower activity
-and eclipses as they begin/end.
+Iris), 30 named **deep-sky objects** (M31 Andromeda, M42 Orion Nebula,
+M45 Pleiades, M57 Ring, Omega Centauri, etc. — toggle `d`), and
+optional **aurora** shimmer near the poleward horizon (toggle `a`).
+Saturn rings tilt with the 29.46-yr ring-plane cycle. Galilean moons
+orbit Jupiter visibly. The HUD event log narrates shower activity and
+eclipses as they begin/end.
 
 **Heliocentric** (`m` = 1): top-down "looking at the solar system from
 above the ecliptic." Sun fixed at centre, Earth + 7 planets at their
 heliocentric ecliptic positions on a `sqrt(r_au)` compressed scale —
 Mercury a few sub-pixels from the Sun, Neptune at the frame edge.
-Decorative parallax star backdrop on by default (toggle with `s`).
-Crank the time-scrub and watch the inner planets whip around while
-Neptune barely moves.
+**Orbital ellipses** drawn as faint dotted traces (one per planet,
+sampled across one full period). Decorative parallax star backdrop on
+by default (toggle `s`). Crank the time-scrub and watch the inner
+planets whip around their orbital traces while Neptune barely moves.
 
 Time controls: `+`/`-` speed (×10 steps), `0` reset, `,`/`.` scrub ±1h.
 Cursor pick (`c` then `hjkl`) lands on planets, comets, or asteroids
@@ -165,6 +169,8 @@ voidwatch --print-state --json | jq '.planets[] | select(.alt_deg > 0)'
   s         toggle helio star backdrop
   g         toggle alt-az grid
   l         toggle constellation lines
+  d         toggle deep-sky objects (M31, M42, …)
+  a         toggle aurora
   t         toggle planet trails
   c         toggle object cursor (then hjkl, Esc to exit)
 ```
@@ -296,12 +302,12 @@ make
   cardinal markers, Milky Way, moon phases, refraction, extinction,
   twilight, body trails, Galilean moons, Saturn rings, sky grid, object
   cursor, meteor showers, eclipses, comets, asteroids).
-- **Tier 5** — HYG v3.6.1 + Stellarium modern skyculture LANDED with
-  `tools/gen_skydata.py`. Named DSO catalogue, aurora effects, GeoNames
-  city lookup all open.
+- **Tier 5** — HYG v3.6.1 + Stellarium 88 constellations + 30 named
+  Messier/NGC DSOs + aurora effect all LANDED. GeoNames city lookup
+  optional, still open.
 - **Heliocentric view** — LANDED (`m` toggle). Top-down solar system
-  with sqrt-scaled distances. Orbital path traces, comets/asteroids in
-  helio, and a helio-specific scan readout still open.
+  with sqrt-scaled distances and orbital path traces. Comets/asteroids
+  in helio + helio-specific scan readout still open.
 - **HUD event log** — LANDED. Meteor shower / eclipse activity now
   announces on transition.
 - **Headless** — `--tonight`, `--print-state`, `--next` LANDED.
