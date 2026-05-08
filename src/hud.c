@@ -138,6 +138,8 @@ void hud_help_overlay(FILE *out, int cols, int rows) {
         "    , / .    scrub time -1h / +1h",
         "    g        toggle alt-az grid",
         "    l        toggle constellation lines",
+        "    d        toggle deep-sky objects",
+        "    a        toggle aurora",
         "    t        toggle planet trails",
         "    m        toggle geo / helio view",
         "    s        toggle helio star backdrop",

@@ -80,9 +80,9 @@ static void print_help(const char *argv0) {
         "\n"
         "Runtime keys: h toggle HUD, ? help overlay, q/Esc quit.\n"
         "Astro keys:   + / - speed, 0 reset, , / . scrub -1h / +1h\n"
-        "              g grid, l constellation lines, t trails,\n"
-        "              m geo/helio view, s helio star backdrop,\n"
-        "              c cursor (hjkl, Esc).\n",
+        "              g grid, l constellation lines, d deep-sky,\n"
+        "              a aurora, t trails, m geo/helio,\n"
+        "              s helio backdrop, c cursor (hjkl, Esc).\n",
         argv0);
 }
 
@@ -201,6 +201,9 @@ int main(int argc, char **argv) {
 
     AstroState astro = {0};
     astro.show_helio_stars = 1;        /* on by default in helio mode */
+    astro.show_dso         = 1;        /* DSOs visible by default in geo */
+    /* astro.show_aurora stays 0 — most observers are at mid-latitudes
+     * where aurora isn't visible. Press `a` to force-render. */
     if (astro_mode) {
         int fb_loc = 0;
         if (location_resolve(cli_lat, cli_lon, &astro.observer, &fb_loc) != 0) {
@@ -285,6 +288,12 @@ int main(int argc, char **argv) {
             }
             else if (astro_mode && (k == 's' || k == 'S')) {
                 astro.show_helio_stars = !astro.show_helio_stars;
+            }
+            else if (astro_mode && (k == 'd' || k == 'D')) {
+                astro.show_dso = !astro.show_dso;
+            }
+            else if (astro_mode && (k == 'a' || k == 'A')) {
+                astro.show_aurora = !astro.show_aurora;
             }
             else if (astro_mode && (k == 'c' || k == 'C')) {
                 astro.cursor_active = !astro.cursor_active;

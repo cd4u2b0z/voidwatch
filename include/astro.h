@@ -7,6 +7,7 @@
 #include "asteroid.h"
 #include "audio.h"
 #include "comet.h"
+#include "dso.h"
 #include "ephem.h"
 #include "framebuffer.h"
 
@@ -48,6 +49,8 @@ typedef struct {
     int            show_grid;            /* alt-az grid lines (key: g)        */
     int            show_constellations;  /* constellation stick figures (l)   */
     int            show_trails;          /* planet RA/Dec trails (key: t)     */
+    int            show_dso;             /* deep-sky objects (key: d)         */
+    int            show_aurora;          /* aurora effect (key: a)            */
     int            cursor_active;        /* object-pick cursor on (key: c)    */
 
     /* Perspective. 0 = geocentric (default — observer's all-sky view),

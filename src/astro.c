@@ -3,6 +3,7 @@
 #include <time.h>
 
 #include "astro.h"
+#include "dso.h"
 #include "framebuffer.h"
 #include "hud.h"
 #include "palette.h"
@@ -926,6 +927,129 @@ static void asteroids_draw(const AstroState *st, Framebuffer *fb) {
     }
 }
 
+/* === Tier 5b: deep-sky objects ====================================== *
+ *
+ * Bundled Messier + bright NGC catalogue from `dso.{h,c}`. Each entry is
+ * stamped as a soft Gaussian patch tinted by kind. Apparent angular size
+ * maps to Gaussian sigma via sqrt-compression — M31 (178 arcmin) reads
+ * as a wide patch, M57 (1.4 arcmin) reads as a near-point.
+ */
+static void dsos_draw(const AstroState *st, Framebuffer *fb) {
+    static const Color tint_for_kind[5] = {
+        { 0.70f, 0.50f, 0.55f },   /* GALAXY: warm pink dust            */
+        { 0.95f, 0.40f, 0.45f },   /* NEBULA_BRIGHT: H-alpha red-pink   */
+        { 0.40f, 0.85f, 0.75f },   /* NEBULA_PLANETARY: OIII cyan-green */
+        { 0.75f, 0.85f, 1.00f },   /* CLUSTER_OPEN: hot blue-white      */
+        { 1.00f, 0.85f, 0.60f },   /* CLUSTER_GLOBULAR: yellow-cream    */
+    };
+    for (int i = 0; i < dso_count; i++) {
+        const DSObject *d = &dso_catalog[i];
+        double ra  = d->ra_h * (M_PI / 12.0);
+        double dec = d->dec_deg * DEG2RAD;
+        float sx, sy;
+        double alt;
+        if (project_sky(st, fb, ra, dec, &sx, &sy, &alt) != 0) continue;
+
+        float intensity = mag_to_intensity(d->mag) * 0.85f;
+        if (intensity < 0.05f) continue;
+        Color tint = tint_for_kind[d->kind];
+        apply_extinction(alt, &tint, &intensity);
+
+        /* Sigma scales with sqrt of apparent arcmin, with floor + ceiling
+         * so M31's 178' patch doesn't swallow Andromeda whole and M57's
+         * 1.4' bullseye doesn't shrink below a single sub-pixel. */
+        float sigma = sqrtf(d->size_arcmin / 5.0f);
+        if (sigma < 1.0f) sigma = 1.0f;
+        if (sigma > 6.0f) sigma = 6.0f;
+        float two_sigma_sq = 2.0f * sigma * sigma;
+        float box = sigma * 2.0f;
+
+        int x0 = (int)floorf(sx - box);
+        int x1 = (int)ceilf (sx + box);
+        int y0 = (int)floorf(sy - box);
+        int y1 = (int)ceilf (sy + box);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > fb->sub_w - 1) x1 = fb->sub_w - 1;
+        if (y1 > fb->sub_h - 1) y1 = fb->sub_h - 1;
+        for (int y = y0; y <= y1; y++) {
+            float dy = (float)y - sy;
+            for (int x = x0; x <= x1; x++) {
+                float dx = (float)x - sx;
+                float t = expf(-(dx*dx + dy*dy) / two_sigma_sq);
+                float k = t * intensity;
+                if (k < 0.005f) continue;
+                fb_add(fb, x, y, tint.r * k, tint.g * k, tint.b * k);
+            }
+        }
+    }
+}
+
+/* === Tier 5c: aurora ================================================ *
+ *
+ * Sun's-altitude-independent shimmering vertical bands near the
+ * poleward horizon. Real auroras need geomagnetic activity (Kp index)
+ * + observer at high latitude; voidwatch ignores both — `a` is a
+ * toggle, the user is the Kp index. Default off to avoid surprising
+ * mid-latitude observers with an unsolicited aurora; press `a` to
+ * force-render anywhere on Earth.
+ *
+ * Colour: oxygen green at low altitudes (~5–10°), violet/red at higher
+ * altitudes (~15–25°), with shimmer phase walking azimuth.
+ */
+static void aurora_draw(const AstroState *st, Framebuffer *fb) {
+    if (!st->show_aurora) return;
+
+    /* Self-paced from CLOCK_MONOTONIC — render-rate-independent shimmer. */
+    static double t = 0.0;
+    static struct timespec last;
+    static int have_last = 0;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (have_last) {
+        double dt = (now.tv_sec  - last.tv_sec)
+                  + (now.tv_nsec - last.tv_nsec) * 1e-9;
+        if (dt > 0.5) dt = 0.5;
+        t += dt;
+    }
+    last = now;
+    have_last = 1;
+
+    int north = (st->observer.lat_rad >= 0.0);
+    double pole_az_rad = north ? 0.0 : M_PI;
+
+    /* Walk az ±60° around the poleward direction, alt 1°..~25°. */
+    for (int az_off = -60; az_off <= 60; az_off += 1) {
+        double az = pole_az_rad + (double)az_off * DEG2RAD;
+        if (az < 0.0)            az += 2.0 * M_PI;
+        if (az >= 2.0 * M_PI)    az -= 2.0 * M_PI;
+
+        float phase = (float)(t * 0.4) + (float)az_off * 0.13f;
+        float intensity_base = 0.55f + 0.40f * sinf(phase);
+        if (intensity_base < 0.18f) continue;
+
+        float top_alt_deg = 18.0f + 8.0f * sinf(phase * 1.7f + 1.1f);
+        if (top_alt_deg < 6.0f) continue;
+
+        for (int alt_deg = 1; alt_deg < (int)top_alt_deg; alt_deg++) {
+            double alt = (double)alt_deg * DEG2RAD;
+            float sx, sy;
+            if (project(fb->sub_w, fb->sub_h, alt, az, &sx, &sy) != 0) continue;
+
+            float fall = 1.0f - (float)alt_deg / top_alt_deg;
+            float k = intensity_base * fall * 0.32f;
+
+            float tup = (float)alt_deg / top_alt_deg;
+            float r = (0.05f + 0.55f * tup) * k;
+            float g = (0.85f - 0.40f * tup) * k;
+            float b = (0.20f + 0.55f * tup) * k;
+
+            int ix = (int)(sx + 0.5f), iy = (int)(sy + 0.5f);
+            fb_max(fb, ix, iy, r, g, b);
+        }
+    }
+}
+
 /* === Tier 4b: comets ================================================ *
  *
  * Bundled set in `comet.c`. Per frame we project each comet that's above
@@ -1338,6 +1462,54 @@ static void helio_map_au(double cx, double cy, float r_scale,
     *sy = (float)(cy + r_screen * sin(theta) * 2.0);
 }
 
+/* Orbital periods in days for the heliocentric trace pass. From Kepler's
+ * third law on the J2000 semi-major axes; the values match astronomical
+ * unit tables to four sig figs. */
+typedef struct {
+    EphemBody body;
+    double    period_days;
+    Color     tint;
+} HelioOrbit;
+
+static const HelioOrbit helio_orbits[] = {
+    { EPHEM_MERCURY,    87.97, { 0.45f, 0.40f, 0.32f } },
+    { EPHEM_VENUS,     224.70, { 0.55f, 0.50f, 0.40f } },
+    { EPHEM_MARS,      686.97, { 0.55f, 0.30f, 0.25f } },
+    { EPHEM_JUPITER,  4332.59, { 0.50f, 0.45f, 0.35f } },
+    { EPHEM_SATURN,  10759.22, { 0.50f, 0.45f, 0.30f } },
+    { EPHEM_URANUS,  30688.50, { 0.30f, 0.45f, 0.50f } },
+    { EPHEM_NEPTUNE, 60182.00, { 0.30f, 0.35f, 0.55f } },
+};
+static const int helio_orbit_count =
+    (int)(sizeof helio_orbits / sizeof helio_orbits[0]);
+
+static void helio_orbit_trace(const AstroState *st, Framebuffer *fb,
+                              float cx, float cy, float r_scale,
+                              EphemBody body, double period_days,
+                              Color tint) {
+    /* Walk one full period from now, sampling 240 evenly-spaced points.
+     * Each point gets a single-pixel fb_max stamp — the result reads as
+     * a continuous dim line at any reasonable terminal size. */
+    const int N = 240;
+    for (int i = 0; i < N; i++) {
+        double jd_s = st->jd + ((double)i / N) * period_days;
+        double x = 0, y = 0, z = 0;
+        if (body == EPHEM_COUNT) {
+            /* Sentinel for Earth, which isn't an EphemBody. */
+            ephem_earth_helio_xyz(jd_s, &x, &y, &z);
+        } else {
+            ephem_helio_xyz_for(body, jd_s, &x, &y, &z);
+        }
+        float sx, sy;
+        helio_map_au(cx, cy, r_scale, x, y, &sx, &sy);
+        int ix = (int)floorf(sx + 0.5f);
+        int iy = (int)floorf(sy + 0.5f);
+        if (ix < 0 || iy < 0 || ix >= fb->sub_w || iy >= fb->sub_h) continue;
+        fb_max(fb, ix, iy,
+               tint.r * 0.45f, tint.g * 0.45f, tint.b * 0.45f);
+    }
+}
+
 static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
     float cx = (float)fb->sub_w * 0.5f;
     float cy = (float)fb->sub_h * 0.5f;
@@ -1345,6 +1517,17 @@ static void astro_draw_heliocentric(const AstroState *st, Framebuffer *fb) {
     /* Neptune at 30 AU sits at r_max; sqrt-scale picks the per-sqrt-AU
      * conversion factor accordingly. */
     float r_scale = r_max / (float)sqrt(30.5);
+
+    /* Orbital ellipses first so the body discs and Sun stamp on top. */
+    Color earth_orbit_tint = { 0.30f, 0.40f, 0.55f };
+    helio_orbit_trace(st, fb, cx, cy, r_scale, EPHEM_COUNT, 365.25,
+                      earth_orbit_tint);
+    for (int k = 0; k < helio_orbit_count; k++) {
+        helio_orbit_trace(st, fb, cx, cy, r_scale,
+                          helio_orbits[k].body,
+                          helio_orbits[k].period_days,
+                          helio_orbits[k].tint);
+    }
 
     /* Sun at centre — slightly smaller than the geocentric stamp because
      * the rest of the diagram is much smaller than the Sun's geocentric
@@ -1403,6 +1586,11 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
      * Drawn first so MW + stars overdraw it cleanly with fb_max. */
     twilight_draw(st, fb);
 
+    /* Aurora — when toggled on (`a`), shimmering streaks near the
+     * poleward horizon. Drawn after twilight (so it stays visible at
+     * dusk) but before stars (so stars overdraw the upper bands). */
+    aurora_draw(st, fb);
+
     /* Diffuse Milky Way wash sits behind the bodies — fb_max doesn't
      * accumulate, so re-stamping each frame is fine. */
     milkyway_draw(st, fb);
@@ -1416,6 +1604,10 @@ void astro_draw(const AstroState *st, Framebuffer *fb,
      * wants a clean naked sky. */
     if (st->show_constellations) constellations_draw(st, fb);
     stars_draw(st, fb);
+
+    /* DSOs (M31, M42, etc.) — fuzzy patches between stars and planets.
+     * Default on; toggle with `d`. */
+    if (st->show_dso) dsos_draw(st, fb);
 
     /* Trails behind the planet discs — additive so newest sample blends
      * into the planet glow seamlessly. */
