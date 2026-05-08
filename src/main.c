@@ -354,6 +354,7 @@ int main(int argc, char **argv) {
             astro_offset += dt * (astro_speed - 1.0);
             time_t virt_now = time(NULL) + (time_t)astro_offset;
             astro_update(&astro, virt_now);
+            astro_surface_events(&astro, t_total);
         }
 
         /* Supernova: hard transient + cooldown spawns a photon shell from

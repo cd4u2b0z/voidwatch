@@ -4,6 +4,7 @@
 
 #include "astro.h"
 #include "framebuffer.h"
+#include "hud.h"
 #include "palette.h"
 #include "skydata.h"
 #include "vwconfig.h"
@@ -1266,6 +1267,50 @@ static void apply_solar_eclipse(Framebuffer *fb,
             p[2] *= dim;
         }
     }
+}
+
+/* Edge-triggered HUD event surfacing. Module-static prev_* track the
+ * last frame's "is this thing active?" state so we only push log lines
+ * on transitions, not every frame. The values reset to "inactive" at
+ * program start, so a voidwatch launched mid-eclipse will still log
+ * the "begins" line on its first frame — better than silence. */
+void astro_surface_events(const AstroState *st, double t_mono) {
+    static const MeteorShower *prev_shower = NULL;
+    static int prev_solar = 0;
+    static int prev_lunar = 0;
+
+    /* Meteor shower — fires when the active shower *changes*, including
+     * the transition from "no shower" to one (and vice versa). The
+     * MIN_RATE floor is in showers/hr; below it we treat the shower as
+     * inactive even if its profile is technically nonzero. */
+    const float MIN_RATE_PER_HR = 1.0f;
+    float rate_per_min = 0.0f;
+    const MeteorShower *sh = meteor_active_shower(st->jd, &rate_per_min);
+    int now_active = (sh != NULL && rate_per_min * 60.0f >= MIN_RATE_PER_HR);
+    if (now_active && sh != prev_shower) {
+        char buf[28];
+        snprintf(buf, sizeof buf, "%s ~%.0f/hr", sh->name, rate_per_min * 60.0f);
+        hud_log_event(t_mono, buf);
+    } else if (!now_active && prev_shower != NULL) {
+        char buf[28];
+        snprintf(buf, sizeof buf, "%s ended", prev_shower->name);
+        hud_log_event(t_mono, buf);
+    }
+    prev_shower = now_active ? sh : NULL;
+
+    /* Solar eclipse — factor > 0 means the Moon is overlapping the Sun
+     * by enough to dim the disc. Threshold of 0.05 to ignore numerical
+     * noise on the boundary. */
+    int now_solar = (solar_eclipse_factor(st) > 0.05);
+    if (now_solar && !prev_solar)        hud_log_event(t_mono, "solar eclipse begins");
+    else if (!now_solar && prev_solar)   hud_log_event(t_mono, "solar eclipse ends");
+    prev_solar = now_solar;
+
+    /* Lunar eclipse — same shape. */
+    int now_lunar = (lunar_eclipse_factor(st) > 0.05);
+    if (now_lunar && !prev_lunar)        hud_log_event(t_mono, "lunar eclipse begins");
+    else if (!now_lunar && prev_lunar)   hud_log_event(t_mono, "lunar eclipse ends");
+    prev_lunar = now_lunar;
 }
 
 void astro_draw(const AstroState *st, Framebuffer *fb,

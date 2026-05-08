@@ -70,6 +70,12 @@ typedef struct {
 /* Compute every body's geocentric + topocentric position from `now`. */
 void astro_update(AstroState *st, time_t now);
 
+/* Push HUD event-log entries when astro state transitions: meteor shower
+ * goes active/inactive, solar/lunar eclipse begins/ends. Idempotent —
+ * only fires on edges, not every frame. `t_mono` is the same monotonic
+ * timestamp threaded through hud_draw / hud_log_event. */
+void astro_surface_events(const AstroState *st, double t_mono);
+
 /* Stamp body discs/labels into the framebuffer. Called between
  * `body_draw` and `render_flush` — same composite slot. */
 void astro_draw(const AstroState *st, Framebuffer *fb,
