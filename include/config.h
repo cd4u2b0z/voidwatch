@@ -75,7 +75,7 @@ static const float PLANET_ORBIT_FRAC[PLANET_COUNT] = {
 
 /* Particle system. */
 #define PARTICLE_CAP            2048
-#define PARTICLE_DUST_TARGET    80      /* sparse twinkle, not a sparkle-grid */
+#define PARTICLE_DUST_TARGET    40      /* sparse twinkle, not a sparkle-grid */
 
 /* Emission rates (events / second / emitter). Photon flux deliberately
  * sparse — omnidirectional bursts from a point source read as fireworks
@@ -121,11 +121,19 @@ static const float PLANET_ORBIT_FRAC[PLANET_COUNT] = {
 
 /* How hard each band pushes its modulation target.
  * Final factor is (1 + band[i] * MOD_*) — 0 audio → 1.0 → identity. */
-#define MOD_BASS_BODY        2.00f   /* star/neutron brightness  — was 0.85 */
-#define MOD_BASS_NEBULA      1.20f   /* nebula intensity         — was 0.55 */
-#define MOD_LOWMID_EMIT      3.50f   /* particle emission rate   — was 1.40 */
-#define MOD_TREBLE_TWINKLE   5.00f   /* starfield shimmer depth  — was 2.50 */
-#define MOD_SUBBASS_SHAKE    4.00f   /* sub-pixel camera jitter  — was 1.80 */
+/* Audio modulation depth. The "calm" tier — calibrated 2026-05-08
+ * after vw-sandbox started routing desktop audio properly. Earlier
+ * values (in trailing comments) were tuned when capture was silent
+ * by default and felt subtle; with real music arriving at full
+ * volume those numbers overreact (stars flicker like static, camera
+ * shake yanks the orbital system off-centre, etc.). Halving most of
+ * them and quartering the camera shake gets back to "passive sensor
+ * feed" while still letting bass kicks be visible. */
+#define MOD_BASS_BODY        0.80f   /* star/neutron brightness  — was 2.00 */
+#define MOD_BASS_NEBULA      0.50f   /* nebula intensity         — was 1.20 */
+#define MOD_LOWMID_EMIT      1.50f   /* particle emission rate   — was 3.50 */
+#define MOD_TREBLE_TWINKLE   2.00f   /* starfield shimmer depth  — was 5.00 */
+#define MOD_SUBBASS_SHAKE    1.00f   /* sub-pixel camera jitter  — was 4.00 */
 
 /* ---- Supernova (audio-triggered photon shell) ---------------------- */
 #define SUPERNOVA_THRESHOLD   0.55f   /* snap.transient must clear this */
